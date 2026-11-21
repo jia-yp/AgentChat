@@ -1,0 +1,13 @@
+[Unit]
+Description=AgentChat local workspace bridge
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/absolute/path/to/AgentChat
+ExecStart=/usr/bin/python3 /absolute/path/to/AgentChat/agentchat.py run --config /absolute/workspace/.agentchat/setup-host.json
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
