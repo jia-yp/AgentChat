@@ -1,6 +1,9 @@
 import os
+import base64
+import binascii
 import hashlib
 import io
+import re
 import json
 import math
 import zipfile
@@ -82,6 +85,34 @@ class PermissionInput(BaseModel):
 
 class AppearanceInput(BaseModel):
     bubble_color: str = Field(pattern=r'^(#[0-9a-fA-F]{6})?$',max_length=7)
+
+
+AVATAR_ICONS = {'codex','claude','antigravity','deepseek'}
+AVATAR_MAX = 24000
+IMAGE_MAGIC = {'png':b'\x89PNG\r\n\x1a\n','jpeg':b'\xff\xd8\xff','webp':b'RIFF'}
+
+
+class AvatarInput(BaseModel):
+    avatar: str = Field(max_length=AVATAR_MAX)
+
+
+def valid_avatar(value:str)->str:
+    """'' (default), icon:<harness>, text:<1-2 characters>, or a small base64 PNG/JPEG/WebP data URL."""
+    if value=='':return value
+    if value.startswith('icon:'):
+        if value[5:] in AVATAR_ICONS:return value
+        raise Problem('不支持的头像图标',422)
+    if value.startswith('text:'):
+        text=value[5:].strip()
+        if 1<=len(text)<=2 and text.isprintable() and not any(c in text for c in '<>&"\''):return 'text:'+text
+        raise Problem('文字头像需为 1–2 个字符',422)
+    match=re.fullmatch(r'data:image/(png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})',value)
+    if not match:raise Problem('头像图片格式无效',422)
+    try:data=base64.b64decode(match.group(2),validate=True)
+    except (binascii.Error,ValueError):raise Problem('头像图片格式无效',422) from None
+    kind=match.group(1)
+    if not data.startswith(IMAGE_MAGIC[kind]) or (kind=='webp' and data[8:12]!=b'WEBP'):raise Problem('头像图片内容与格式不符',422)
+    return value
 
 
 class TemplateInput(BaseModel):
@@ -541,6 +572,17 @@ def create_app(data_dir=None):
             color=data.bubble_color.lower()
             db.execute('UPDATE members SET bubble_color=? WHERE id=?',(color,member_id))
         return {'id':member_id,'bubble_color':color}
+
+    @app.post('/api/rooms/{room_id}/members/{member_id}/avatar')
+    def member_avatar(room_id:str,member_id:str,data:AvatarInput,request:Request):
+        a=user(request)
+        avatar=valid_avatar(data.avatar)
+        with store.tx() as db:
+            store.access(db,room_id,a)
+            member=store.member(db,member_id)
+            if member['room']!=room_id or member['kind'] not in ('agent','user'):raise Problem('成员不存在',404)
+            db.execute('UPDATE members SET avatar=? WHERE id=?',(avatar,member_id))
+        return {'id':member_id,'avatar':avatar}
 
     @app.post('/api/rooms/{room_id}/messages/{message_id}/recall')
     def recall_message(room_id:str,message_id:int,request:Request):

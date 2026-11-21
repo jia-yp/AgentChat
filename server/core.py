@@ -150,7 +150,7 @@ class Store:
             for table,columns in {
                 'rooms':{'max_rounds':'INTEGER NOT NULL DEFAULT 8','round_mode':"TEXT NOT NULL DEFAULT 'global'",'session_rounds':"TEXT NOT NULL DEFAULT '{}'",'session_speaks':"TEXT NOT NULL DEFAULT '{}'"},
                 'members':{'runtime':"TEXT NOT NULL DEFAULT '{}'",'session_type':"TEXT NOT NULL DEFAULT 'worker'",'disabled_reason':"TEXT NOT NULL DEFAULT ''",'steer_supported':'INTEGER NOT NULL DEFAULT 0','sync_supported':'INTEGER NOT NULL DEFAULT 0',
-                           'deleted_at':'REAL NOT NULL DEFAULT 0','lifecycle_supported':'INTEGER NOT NULL DEFAULT 0','summary_supported':'INTEGER NOT NULL DEFAULT 0','bubble_color':"TEXT NOT NULL DEFAULT ''",'claims_paused_until':'REAL NOT NULL DEFAULT 0'},
+                           'deleted_at':'REAL NOT NULL DEFAULT 0','lifecycle_supported':'INTEGER NOT NULL DEFAULT 0','summary_supported':'INTEGER NOT NULL DEFAULT 0','bubble_color':"TEXT NOT NULL DEFAULT ''",'avatar':"TEXT NOT NULL DEFAULT ''",'claims_paused_until':'REAL NOT NULL DEFAULT 0'},
                 'messages':{'max_rounds':'INTEGER NOT NULL DEFAULT 8','stopped':'INTEGER NOT NULL DEFAULT 0',
                             'runtime':"TEXT NOT NULL DEFAULT '{}'",'recipient_names':"TEXT NOT NULL DEFAULT ''",'private_to':"TEXT NOT NULL DEFAULT ''",
                             'round_mode':"TEXT NOT NULL DEFAULT 'global'",'session_rounds':"TEXT NOT NULL DEFAULT '{}'",
@@ -717,7 +717,7 @@ class Store:
             steering.settle(db)
             if actor['kind']=='user':reading.settle(self,db,room_id)
             session_changes.settle(db,room_id)
-            members = [dict(m) for m in db.execute('SELECT id,name,kind,role,harness,bridge,enabled,paused,revoked,status,last_seen,native_id,detail,runtime,session_type,disabled_reason,steer_supported,sync_supported,created,deleted_at,lifecycle_supported,bubble_color,token_hash IS NOT NULL AS has_credential FROM members WHERE room=?',(room_id,))]
+            members = [dict(m) for m in db.execute('SELECT id,name,kind,role,harness,bridge,enabled,paused,revoked,status,last_seen,native_id,detail,runtime,session_type,disabled_reason,steer_supported,sync_supported,created,deleted_at,lifecycle_supported,bubble_color,avatar,token_hash IS NOT NULL AS has_credential FROM members WHERE room=?',(room_id,))]
             members=[m for m in members if m['session_type']!='manager' or actor['kind']=='user' or m['id']==actor['id'] or (actor['kind']=='bridge' and m['bridge']==actor['id'])]
             room['session_rounds']={k:v for k,v in json.loads(room['session_rounds']).items() if k in {m['id'] for m in members}}
             room['session_speaks']={k:v for k,v in json.loads(room['session_speaks']).items() if k in {m['id'] for m in members}}

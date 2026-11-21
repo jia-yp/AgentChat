@@ -2,29 +2,38 @@
    details stay folded until hover, focus or an explicit click. Touch devices,
    which cannot hover, keep those details visible. */
 :root{
-  --surface:#fff;--chrome:#f7f7f5;--hover:#f2f2ef;--pressed:#ebebe7;
-  --line:#e9e9e5;--line-strong:#d7d7d1;
-  --ink:#1c1c1a;--ink-2:#53534d;--ink-3:#8a8a82;
-  --teal:#1d7466;--accent:#1d7466;--accent-soft:#e6f1ee;--private:#6c5a9c;--danger:#b23f2c;
+  /* Warm paper with soft ink: lower glare than pure white, contrast kept for text. */
+  --surface:#fbfaf7;--raised:#fffefb;--chrome:#f4f2ec;--hover:#efebe4;--pressed:#e8e3da;
+  --line:#e7e2d9;--line-strong:#d5cec2;
+  --ink:#2c2925;--ink-2:#5a544c;--ink-3:#857d71;
+  --teal:#3a7a6b;--accent:#3a7a6b;--accent-strong:#2e6457;--accent-soft:#e5eee9;
+  --private:#79639b;--danger:#b0503b;--ok:#4f9a72;
   color:var(--ink);background:var(--surface);
   font-family:Inter,"Segoe UI","Microsoft YaHei UI","Microsoft YaHei",sans-serif;
 }
 body{background:var(--surface)}
-::selection{background:#cfe5df}
+::selection{background:#d8e8e0}
 
 /* Controls */
-input,textarea,select{border-color:var(--line-strong);border-radius:7px;padding:9px 11px;color:var(--ink)}
-input:focus,textarea:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px #1d74661f}
+input,textarea,select{border-color:var(--line-strong);border-radius:7px;padding:9px 11px;color:var(--ink);background-color:var(--raised)}
+input:focus,textarea:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px #3a7a6b1f}
 .primary,.secondary{border-radius:7px;font-weight:500}
-.primary{background:var(--accent)}.primary:hover{background:#155b50}
-.secondary{background:var(--surface);border:1px solid var(--line-strong);color:var(--ink)}.secondary:hover{background:var(--hover)}
+.primary{background:var(--accent)}.primary:hover{background:var(--accent-strong)}
+.secondary{background:var(--raised);border:1px solid var(--line-strong);color:var(--ink)}.secondary:hover{background:var(--hover)}
 .text-button{color:var(--ink-3);font-size:12px}.text-button:hover:not(:disabled){color:var(--ink)}
 .icon-button:hover{background:var(--hover)}
 .muted{color:var(--ink-3)}
-.avatar{border-radius:8px;background:var(--pressed);color:var(--ink-2);font-weight:600}
-.avatar.human{background:#efe6d6;color:#6b5634}.avatar.agent{background:#e3ecf2;color:#2f5873}.avatar.bridge{background:#ece7f3;color:#5e4b86}
-.toast{background:var(--ink);color:#fff;border-radius:8px}
+.toast{background:var(--ink);color:#fbfaf7;border-radius:8px}
 button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* Avatars: harness icon by default, or a chosen icon / text / picture */
+.avatar{border-radius:8px;background:var(--pressed);color:var(--ink-2);font-weight:600;overflow:hidden}
+.avatar.human{background:#efe3cf;color:#6e5733}.avatar.agent{background:#e2eaec;color:#355a66}.avatar.bridge{background:#ebe5f1;color:#5f4d82}
+.avatar img{display:block;width:100%;height:100%;object-fit:contain}
+.avatar.avatar-icon{background:var(--raised);box-shadow:inset 0 0 0 1px var(--line);padding:0}
+.avatar.avatar-icon img{width:66%;height:66%}
+.avatar.avatar-image{padding:0;background:var(--pressed)}.avatar.avatar-image img{object-fit:cover}
+.avatar.avatar-text{font-size:13px}
 
 /* Sidebar: same paper as the app, separated by a hairline */
 .sidebar{background:var(--chrome);color:var(--ink);border-right:1px solid var(--line);padding:16px 10px 12px}
@@ -44,28 +53,28 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 /* Header */
 .topbar{background:var(--surface);border-bottom-color:var(--line)}
 .breadcrumb strong{color:var(--ink)}
-.connection{color:var(--ink-3);font-size:12px}.connection i{background:#3f9b6d}
+.connection{color:var(--ink-3);font-size:12px}.connection i{background:var(--ok)}
 .connection.lost{color:var(--danger)}.connection.lost i{background:var(--danger)}
 .room-head{background:var(--surface)}
 .room-head p{color:var(--ink-3)}
 
 /* Messages: flat rows; the body is plain text, not a bubble */
-.messages{scrollbar-color:#d0d0ca transparent}
+.messages{scrollbar-color:#d3ccc0 transparent}
 .message,.round-body .message{position:relative;gap:12px;margin:0;padding:8px 12px;border-radius:8px}
-.message-content{max-width:860px}
+.message-content{max-width:860px;min-width:0}
 .message-meta{gap:8px;margin:0 0 3px;min-height:0;align-items:baseline;font-size:12px;flex-wrap:wrap}
 /* Name and time first; model, number and actions trail and fade in on hover. */
 .sender-block{display:contents}
 .sender-block strong{order:1;font-size:14px;color:var(--ink);line-height:1.4}
 .message-meta time{order:2}.message-meta .kind{order:3;display:none}
-.runtime-meta{order:4;margin:0;font-size:12px;color:var(--ink-3)}
-.message-number{order:5;margin-left:auto}
-.message-actions{order:6}
+.message-excerpt{order:4}
+.runtime-meta{order:5;margin:0;font-size:12px;color:var(--ink-3)}
+.message-number{order:6;margin-left:auto}
+.message-actions{order:7;display:inline-flex;gap:12px;margin-left:4px}
 .message.private-message .kind{display:inline;background:transparent;padding:0;font-size:12px;color:var(--private)}
 .message-meta time,.message-number{font-size:12px;color:var(--ink-3)}
-.message-actions{display:inline-flex;gap:12px;margin-left:4px}
 .message-actions .text-button{font-size:12px;padding:0}
-.message-body,.message.self .message-body{padding:0;border:0;border-radius:0;background:transparent;color:var(--ink);font-size:14px;line-height:1.7}
+.message-body,.message.self .message-body{padding:0;border:0;border-radius:0;background:transparent;color:var(--ink);font-size:14px;line-height:1.72}
 .message-body .mention{color:var(--accent);font-weight:500}
 .message-body a{color:var(--accent)}
 .message-body>.quote,.quote{margin:2px 0 8px;padding:0 0 0 12px;border-left:2px solid var(--line-strong);background:transparent;color:var(--ink-2);font-size:13px}
@@ -78,6 +87,14 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .steer-queued,.steer-receipt{color:var(--accent);font-size:12px}
 .message[data-bubble-color] .message-body{padding:8px 12px;border-radius:8px;border:1px solid var(--bubble-border)}
 .message.recalled-message .message-body{color:var(--ink-3);font-size:13px}
+/* A folded message keeps its sender line and a one-line excerpt. */
+.message-excerpt{flex:1 1 0;min-width:0;padding:0;border:0;background:transparent;text-align:left;font-size:13px;line-height:1.4;color:var(--ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer}
+.message-excerpt:hover{color:var(--ink)}
+.message.folded{padding-top:5px;padding-bottom:5px}
+.message.folded .message-meta{flex-wrap:nowrap;margin:0}
+.message.folded :is(.message-body,.message-controls,.runtime-meta){display:none}
+.message.folded>.avatar{width:24px;height:24px;font-size:10px;margin-top:0}
+.message.folded .message-number{margin-left:0}
 
 /* Rounds: one quiet line each */
 .round-header{min-height:32px;padding:0 12px;border-radius:6px}
@@ -86,32 +103,35 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .round-chevron{color:var(--ink-3)}
 .round-count,.round-date{font-size:12px;color:var(--ink-3)}
 .round-excerpt{font-size:13px;color:var(--ink-3)}
-.segment-actions button,.summary-status,.summary-status button{font-size:12px}
+.segment-actions{gap:12px}.segment-actions button,.summary-status,.summary-status button{font-size:12px}
 .private-block .round-toggle strong{color:var(--private)}.human-block .round-toggle strong{color:var(--ink)}
-.round-summary,.round-summary[data-bubble-color]{margin:2px 0 10px 54px;padding:0 0 0 12px;border-left:2px solid var(--accent-soft);background:transparent;border-radius:0}
+.round-summary,.round-summary[data-bubble-color]{margin:2px 0 10px 54px;padding:0 0 0 12px;border-left:2px solid #c9dcd3;background:transparent;border-radius:0}
 .round-summary>span{font-size:12px;color:var(--ink-3)}.round-summary p{font-size:13px;color:var(--ink-2)}
 .summary-status{margin-left:54px;color:var(--ink-3)}
 .selected-round>.round-header{background:var(--accent-soft);box-shadow:inset 2px 0 var(--accent)}
-.history-tick span{background:#d6d6d0}.history-tick.human-tick span{background:#a9a9a1}.history-tick.private-tick span{background:#c3b8da}
+.history-tick span{background:#d9d2c6}.history-tick.human-tick span{background:#ada498}.history-tick.private-tick span{background:#c9bcdb}
 .history-tick:hover span,.history-tick:focus-visible span,.history-tick.active span{background:var(--ink-2)}
-.history-preview{border-color:var(--line);box-shadow:0 8px 28px #0000001a;color:var(--ink)}
-.reading-highlight{animation:reading-flash 2s ease-out}
+.history-preview{background:var(--raised);border-color:var(--line);box-shadow:0 8px 28px #2c29251a;color:var(--ink)}
+@keyframes reading-flash{0%,30%{background:#f3e9c8}100%{background:transparent}}
 
 /* Reading toolbar: batch actions only while selecting */
 .reading-toolbar{border-bottom-color:var(--line)}
 .reading-toolbar:not(.selecting) #expand-selected,.reading-toolbar:not(.selecting) #collapse-selected{display:none}
 .reading-toolbar>span{color:var(--ink-3)}
 .reading-toolbar [aria-pressed=true]{color:var(--accent);background:var(--accent-soft)}
-.history-search-panel{background:var(--surface);border-left-color:var(--line);box-shadow:-12px 0 30px #0000000d}
+.history-search-panel{background:var(--surface);border-left-color:var(--line);box-shadow:-12px 0 30px #2c29250d}
 .search-result:hover{background:var(--hover)}.search-result strong{color:var(--ink)}.search-result p{color:var(--ink-2)}
+.search-result mark{background:#f1e2b0}
 
 /* Sync progress */
 .sync-heading strong{color:var(--accent)}.sync-person strong{color:var(--ink-2)}.sync-person span,.sync-heading>span{color:var(--ink-3)}
 
 /* Composer pieces shared by phone and desktop */
+.composer{background:var(--raised)}
+.composer textarea{background:transparent}
 .chip{border:0;background:transparent;color:var(--ink-2);border-radius:6px}
 .chip:hover{background:var(--hover)}
-.chip.selected{background:var(--accent-soft);color:var(--accent);box-shadow:none;font-weight:500}
+.chip.selected{background:var(--accent-soft);color:var(--accent-strong);box-shadow:none;font-weight:500}
 .quote-preview{background:transparent;border-left:2px solid var(--accent);border-radius:0;color:var(--ink-2)}
 .recipient-label{color:var(--ink-3);font-weight:500}
 .stop-button{color:var(--danger)}
@@ -121,58 +141,78 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .roster-title h2{font-size:13px;color:var(--ink-2);cursor:help}
 .roster-title>span{background:transparent;color:var(--ink-3);font-size:12px;padding:0}
 .member{position:relative;margin:0 0 1px;padding:7px 8px;border-radius:8px}
-.member:hover{background:var(--chrome)}.member.expanded{background:var(--chrome)}
+.member:hover,.member.expanded{background:var(--chrome)}
 .member-toggle{position:absolute;left:0;right:0;top:0;height:46px;padding:0;background:transparent;border-radius:8px;z-index:1}
 .member-toggle:focus-visible{outline-offset:-2px}
 .member-top{gap:10px}.member-top .avatar{width:30px;height:30px;font-size:11px}
 .member-info strong{font-size:13.5px;line-height:1.35}
 .member-info small{font-size:12px;color:var(--ink-3);margin-top:1px}
-.status-dot{background:#c9c9c2}.status-dot.online{background:#3f9b6d}.status-dot.running{background:#d39b33;box-shadow:0 0 0 3px #f6ecd6}
+.status-dot{background:#cdc6ba}.status-dot.online{background:var(--ok)}.status-dot.running{background:#cf9a3c;box-shadow:0 0 0 3px #f4e8cf}
 .member-role,.roster-switch,.member-actions{display:none}
 .member.expanded .member-role{display:block;margin:8px 0 8px 40px;font-size:12px;line-height:1.65;color:var(--ink-2)}
+.member.expanded .member-role:empty{display:none}
 .member.expanded .roster-switch{display:inline-flex;margin:0 0 8px 40px}
-.member.expanded .member-actions{display:flex;margin:0 0 2px 40px;gap:14px}
+.member.expanded .member-actions{display:flex;align-items:center;min-height:26px;margin:0 0 0 40px;gap:14px}
 .member-detail{margin:6px 0 0 40px;font-size:12px;color:var(--danger)}
 .session-switch{font-size:12px;color:var(--ink-2)}
-.member-color-trigger{display:none;z-index:2;top:8px;right:8px;width:26px;height:26px;padding:4px;border-color:var(--line-strong)}
-.member-color-trigger>span{width:16px;height:16px;border-radius:4px}
-.member.expanded .member-color-trigger{display:block}
-.member.has-color .member-top{padding-right:0}.member.has-color.expanded .member-top{padding-right:32px}
+/* The appearance button gets its own last row inside an expanded member. */
+.member.has-color .member-top,.member.has-color.expanded .member-top{padding-right:0}
+.member.expanded.has-color{padding-bottom:40px}
+.member-color-trigger{display:none;z-index:2;top:auto;left:48px;right:auto;bottom:8px;width:auto;height:26px;padding:0 9px;align-items:center;gap:6px;font-size:12px;color:var(--ink-2);background:var(--raised);border:1px solid var(--line-strong);border-radius:6px}
+.member-color-trigger>span{width:10px;height:10px;border-radius:3px;border:1px solid var(--line-strong)}
+.member-color-trigger:hover,.member-color-trigger[aria-expanded=true]{border-color:var(--ink-3);background:var(--hover)}
+.member.expanded .member-color-trigger{display:inline-flex}
 .roster-hint{margin:14px 8px 0;font-size:12px;line-height:1.6;color:var(--ink-3)}
-.member-colors{border-color:var(--line);box-shadow:0 10px 32px #0000001f}
+.member-colors{background:var(--raised);border-color:var(--line);box-shadow:0 10px 32px #2c29251f;width:300px;padding:14px 16px 16px}
+.color-heading{font-size:12px;color:var(--ink-2);margin-bottom:6px}
+.appearance-label{display:block;margin:10px 0 7px;font-size:12px;color:var(--ink-3)}
+.avatar-choices{display:flex;gap:6px;flex-wrap:wrap}
+.avatar-choice{padding:2px;border:1px solid transparent;border-radius:10px;background:transparent}
+.avatar-choice .avatar{width:34px;height:34px;font-size:11px}
+.avatar-choice:hover{background:var(--hover)}
+.avatar-choice[aria-pressed=true]{border-color:var(--accent);background:var(--accent-soft)}
+.avatar-custom{display:flex;gap:8px;align-items:center;margin:10px 0 4px}
+.avatar-custom .avatar-text{width:104px;height:30px;margin:0;padding:4px 9px;font-size:13px}
+.member-colors label.avatar-upload{display:inline-flex;align-items:center;height:30px;margin:0;padding:0 11px;font-size:12px;font-weight:500;cursor:pointer}
+.color-swatch,.custom-color-label input[type=color]{border-color:var(--line-strong)}
+.color-swatch[aria-pressed=true]{outline-color:var(--accent)}
+.color-reset{margin-top:10px;font-size:12px}
 
 /* Management page: entity cards stay, inner panels become plain sections */
 .manage-intro h2{font-weight:600}.manage-intro p{color:var(--ink-3);font-size:13px}
 .manage-count{background:transparent;color:var(--ink-3);padding:0}
 .model-guidance{padding:0;border:0;background:transparent;color:var(--ink-3)}.model-guidance p{font-size:13px}
 .session-toolbar{background:var(--surface)}
-.model-card{border-color:var(--line);border-radius:10px;box-shadow:none}
+.model-card{background:var(--raised);border-color:var(--line);border-radius:10px;box-shadow:none}
 .model-role{color:var(--ink-2);font-size:13px}.model-meta,.model-applied,.permission-applied,.harness-name{color:var(--ink-3)}
-.model-sync{background:var(--chrome);color:var(--ink-3)}.model-sync.synced{background:var(--accent-soft);color:var(--accent)}
+.model-sync{background:var(--chrome);color:var(--ink-3)}.model-sync.synced{background:var(--accent-soft);color:var(--accent-strong)}
 .archived-session{background:var(--chrome)}
 .manage-empty{border-color:var(--line-strong)}
 
 /* Dialogs: one surface; only scroll regions keep a frame */
-dialog{border-color:var(--line);border-radius:12px;box-shadow:0 24px 80px #00000026}
-dialog::backdrop{background:#1c1c1a59;backdrop-filter:none}
+dialog{background:var(--raised);border-color:var(--line);border-radius:12px;box-shadow:0 24px 80px #2c292526}
+dialog::backdrop{background:#2c292559;backdrop-filter:none}
 .dialog-heading h2{font-size:18px;font-weight:600}
+.setup-footer{background:var(--raised)}
 .setup-project-choice,.setup-state,.template-panel{padding:0;border:0;background:transparent;border-radius:0}
 .setup-project-choice{margin-top:14px}.setup-state{height:auto;max-height:82px;color:var(--ink-2)}
 .roles-editor{border-color:var(--line);background:var(--surface)}
 .role-row{background:transparent;border-bottom:1px solid var(--line);border-radius:0;padding:10px 4px;margin:0}
 .role-row:last-child{border-bottom:0}
 .dialog-feedback,.registration-notice{background:var(--accent-soft);border:0;color:var(--ink)}
-.manual-copy{border-color:var(--line);box-shadow:0 10px 32px #0000001a}
-.mention-menu{border-color:var(--line);box-shadow:0 10px 32px #0000001f}
+.manual-copy{background:var(--raised);border-color:var(--line);box-shadow:0 10px 32px #2c29251a}
+.mention-menu{background:var(--raised);border-color:var(--line);box-shadow:0 10px 32px #2c29251f}
 .mention-options>button[aria-selected=true],.mention-options>button:hover{background:var(--hover)}
+
+/* Login keeps its dark panel; only the form side follows the paper tone */
+.auth-screen{background:var(--surface)}
 
 /* Fold-on-hover details, only where a pointer can hover */
 @media(hover:hover){
-  .runtime-meta,.message-number,.message-actions,.segment-actions{opacity:0;transition:opacity .12s}
+  .runtime-meta,.message-number,.message-actions{opacity:0;transition:opacity .12s}
   .message:hover,.message:focus-within{background:var(--chrome)}
   .message:hover :is(.runtime-meta,.message-number,.message-actions),.message:focus-within :is(.runtime-meta,.message-number,.message-actions){opacity:1}
   .round-header:hover,.round-header:focus-within{background:var(--chrome)}
-  .round-header:hover .segment-actions,.round-header:focus-within .segment-actions{opacity:1}
 }
 
 /* Desktop layout */
@@ -189,7 +229,7 @@ dialog::backdrop{background:#1c1c1a59;backdrop-filter:none}
   .room-actions .secondary,.room-actions .primary,#manage-back{height:32px;padding:0 12px;font-size:13px}
   .room-actions .secondary{display:block;border-color:transparent;background:transparent;color:var(--ink-2)}
   .room-actions .secondary:hover{background:var(--hover);color:var(--ink)}
-  .room-actions #setup-open{margin-left:6px;background:var(--surface);border:1px solid var(--line-strong);color:var(--ink)}
+  .room-actions #setup-open{margin-left:6px;background:var(--raised);border:1px solid var(--line-strong);color:var(--ink)}
   .room-actions #setup-open:hover{background:var(--hover)}
   .workspace-body{border-top:0;grid-template-columns:minmax(0,1fr) 248px}
 
@@ -198,14 +238,15 @@ dialog::backdrop{background:#1c1c1a59;backdrop-filter:none}
   .reading-toolbar select:hover{background-color:var(--hover)}
   .reading-toolbar button{font-size:13px}
   .reading-toolbar>span{font-size:12px}
-  .reading-toolbar .secondary{height:28px;padding:0 10px;border-color:transparent;color:var(--ink-2)}
+  .reading-toolbar .secondary{height:28px;padding:0 10px;border-color:transparent;background:transparent;color:var(--ink-2)}
   .reading-toolbar .secondary:hover{background:var(--hover)}
   .reading-shell .messages{padding:10px 40px 16px 12px}
-  .message .avatar{width:30px;height:30px;font-size:11px;margin-top:2px}
+  .message>.avatar{width:30px;height:30px;font-size:11px;margin-top:2px}
+  .message.folded>.avatar{width:24px;height:24px;margin:0 3px}
   .round-summary,.round-summary[data-bubble-color],.summary-status{margin-left:54px}
 
-  .composer{margin:0 24px 16px 24px;padding:6px 12px 8px;border:1px solid var(--line-strong);border-radius:10px;box-shadow:none}
-  .composer:focus-within{border-color:#a9a9a1;box-shadow:0 0 0 3px #1c1c1a0a}
+  .composer{margin:0 24px 16px 24px;padding:6px 12px 8px;border:1px solid var(--line-strong);border-radius:10px;box-shadow:0 1px 2px #2c29250a}
+  .composer:focus-within{border-color:#b9b1a4;box-shadow:0 0 0 3px #2c29250a}
   .quote-slot{height:auto;margin:2px 0 4px}.quote-slot:has(.quote-preview[hidden]){display:none}
   .quote-preview{height:26px;padding:2px 8px;font-size:12px}
   .recipient-line{min-height:30px;gap:6px}.recipient-label{font-size:12px}
@@ -222,10 +263,10 @@ dialog::backdrop{background:#1c1c1a59;backdrop-filter:none}
   .rounds-control input{width:52px;height:30px;font-size:13px;padding:4px 6px}
   .rounds-control small{display:none}
   .send-controls #stop-all{height:30px;padding:0 10px;font-size:13px;border-color:transparent;background:transparent}
-  .send-controls #stop-all:hover{background:#b23f2c12}
+  .send-controls #stop-all:hover{background:#b0503b14}
   .send-controls #send{height:30px;padding:0 16px;font-size:13px}
   /* The mode explanation is a hover/focus note above the mode picker. */
-  .round-mode-description{position:absolute;right:0;bottom:calc(100% + 10px);width:300px;height:auto;margin:0;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--surface);box-shadow:0 8px 24px #0000001a;color:var(--ink-2);font-size:12px;line-height:1.6;visibility:hidden;opacity:0;transition:opacity .12s;z-index:5;pointer-events:none}
+  .round-mode-description{position:absolute;right:0;bottom:calc(100% + 10px);width:300px;height:auto;margin:0;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--raised);box-shadow:0 8px 24px #2c29251a;color:var(--ink-2);font-size:12px;line-height:1.6;visibility:hidden;opacity:0;transition:opacity .12s;z-index:5;pointer-events:none}
   .send-options:has(#round-mode:hover,#round-mode:focus-visible) .round-mode-description:not(.is-private){visibility:visible;opacity:1}
 
   .roster{padding:14px 10px}
@@ -247,10 +288,14 @@ dialog::backdrop{background:#1c1c1a59;backdrop-filter:none}
 @media(max-width:800px){
   .reading-toolbar{background:var(--surface)}
   .message,.round-body .message{padding:6px 4px;gap:8px}
+  .message.folded{padding-top:4px;padding-bottom:4px}
+  .message.folded .message-number{display:none}
+  .message.folded .message-actions{margin-left:auto}
   .message-actions{margin-left:0}
   .round-summary,.round-summary[data-bubble-color],.summary-status{margin-left:36px}
   .composer{border-top-color:var(--line)}
   .composer-footer{border-top-color:var(--line)}
-  #mobile-options-content{border-color:var(--line)}
-  .roster.open{box-shadow:-10px 0 40px #0000001f}
+  #mobile-options-content{background:var(--raised);border-color:var(--line)}
+  .roster.open{box-shadow:-10px 0 40px #2c29251f}
+  .segment-actions{gap:8px}
 }

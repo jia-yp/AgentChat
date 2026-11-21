@@ -120,9 +120,10 @@ function renderMembers() {
     let card=[...box.children].find(el=>el.dataset.memberId===m.id);
     if(!card){card=document.createElement('div');card.className='member';card.dataset.memberId=m.id;card.innerHTML=`<button type="button" class="member-toggle" aria-expanded="false" aria-label="${esc(m.name)}：展开详情"></button><div class="member-main"></div>`;}
     if((previous?previous.nextElementSibling:box.firstElementChild)!==card){if(previous)previous.after(card);else box.prepend(card);}previous=card;
-    const main=card.querySelector('.member-main'),html=`<div class="member-top"><div class="avatar ${m.kind==='user'?'human':m.kind}">${esc(m.name.slice(0,2).toUpperCase())}</div><div class="member-info"><strong>${esc(m.name)}</strong><small>${esc(m.harness || (m.kind==='bridge'?'本地 bridge':'YOU'))} · ${esc(memberStatus(m))}</small></div><i class="status-dot ${m.online?'online':''} ${m.status==='running'?'running':''}"></i></div><p class="member-role">${esc(m.role)}</p>${m.kind==='agent'?`<label class="session-switch roster-switch"><input type="checkbox" role="switch" data-session-switch="${esc(m.id)}" aria-label="启用 ${esc(m.name)}" ${m.paused?'':'checked'}><span>${m.paused?'已关闭':'允许触发'}</span></label>`:''}${m.detail && m.kind==='agent'?`<p class="member-detail">${esc(m.detail)}</p>`:''}${m.kind!=='user'?`<div class="member-actions"><button class="text-button" data-mention="${esc(m.name)}">发给 TA</button>${m.kind==='bridge'?`<button class="text-button" data-member="${esc(m.id)}" data-action="${m.paused?'resume':'pause'}">${m.paused?'恢复':'暂停'}</button>`:''}<button class="text-button" data-member="${esc(m.id)}" data-action="${m.kind==='agent'?'delete':'revoke'}">${m.kind==='agent'?'删除':'撤销'}</button></div>`:''}`;
+    const main=card.querySelector('.member-main'),html=`<div class="member-top">${avatarHTML(m)}<div class="member-info"><strong>${esc(m.name)}</strong><small>${esc(m.harness || (m.kind==='bridge'?'本地 bridge':'YOU'))} · ${esc(memberStatus(m))}</small></div><i class="status-dot ${m.online?'online':''} ${m.status==='running'?'running':''}"></i></div><p class="member-role">${esc(m.role)}</p>${m.kind==='agent'?`<label class="session-switch roster-switch"><input type="checkbox" role="switch" data-session-switch="${esc(m.id)}" aria-label="启用 ${esc(m.name)}" ${m.paused?'':'checked'}><span>${m.paused?'已关闭':'允许触发'}</span></label>`:''}${m.detail && m.kind==='agent'?`<p class="member-detail">${esc(m.detail)}</p>`:''}${m.kind!=='user'?`<div class="member-actions"><button class="text-button" data-mention="${esc(m.name)}">发给 TA</button>${m.kind==='bridge'?`<button class="text-button" data-member="${esc(m.id)}" data-action="${m.paused?'resume':'pause'}">${m.paused?'恢复':'暂停'}</button>`:''}<button class="text-button" data-member="${esc(m.id)}" data-action="${m.kind==='agent'?'delete':'revoke'}">${m.kind==='agent'?'删除':'撤销'}</button></div>`:''}`;
     if(main.innerHTML!==html)main.innerHTML=html;
     renderMemberColors(card,m);
+    if(m.kind==='user'&&m.name===state.me.name)paintAvatar(document.querySelector('.user-row .avatar'),m);
   }
   renderTargets(agents);
 }
@@ -213,6 +214,7 @@ function renderManagement() {
       if(!card){card=document.createElement('article');card.className='model-card archived-session';card.dataset.agent=m.id;card.dataset.archived='true';
         card.innerHTML=`<div class="model-card-head"><div class="avatar agent">${esc(m.name.slice(0,2).toUpperCase())}</div><div><h3>${esc(m.name)}</h3><span class="harness-name">${esc(m.harness)}${m.session_type==='manager'?' · 私有 manager':''}</span></div><span class="model-sync">${esc(memberStatus(m))}</span></div><p class="model-role">${esc(m.role)}</p><p class="archived-info"></p>${sessionFooter(m)}`;
         const button=card.querySelector('[data-session-action]');button.dataset.sessionAction='restore';button.className='secondary';button.textContent='恢复 session';container.appendChild(card);}
+      paintAvatar(card.querySelector('.model-card-head .avatar'),m);
       card.querySelector('[data-session-action]').disabled=!m.restorable||state.sessionActions.has(m.id);
       card.querySelector('.archived-info').textContent=m.restorable?`删除于 ${formatTime(m.deleted_at)}。恢复后等待你再次 @；此前的任务不会重放。`:'原接入凭证已撤销，保留历史记录；需要重新接入新的 session。';
       continue;
@@ -222,6 +224,7 @@ function renderManagement() {
       card.innerHTML=`<div class="model-card-head"><div class="avatar agent">${esc(m.name.slice(0,2).toUpperCase())}</div><div><h3>${esc(m.name)}</h3><span class="harness-name">${esc(m.harness)}${m.session_type==='manager'?' · 私有 manager':''}</span></div><span class="model-sync"></span></div><div class="session-switch-row"><label class="session-switch"><input type="checkbox" role="switch" data-session-switch="${esc(m.id)}" aria-label="启用 ${esc(m.name)}"><span>允许触发</span></label><small class="switch-reason"></small></div><p class="model-role"></p><div class="model-meta"></div><form data-model-form="${esc(m.id)}"><label for="model-${esc(m.id)}">指定模型</label><div class="model-picker"><select id="model-${esc(m.id)}" class="model-input"></select><button type="button" class="secondary model-refresh">刷新列表</button></div><p class="model-catalog-source muted small"></p><details class="custom-model-details"><summary>自定义模型 ID</summary><input class="custom-model" aria-label="${esc(m.name)} 自定义模型 ID" maxlength="200" autocomplete="off" spellcheck="false"></details><p class="model-applied"></p><p class="model-error" role="status"></p><div class="model-actions"><button type="button" class="text-button model-auto">由 harness 决定</button><button type="button" class="secondary model-reload">载入已保存配置</button><button type="submit" class="primary model-save">保存模型</button></div></form>`;
       container.appendChild(card);
     }
+    paintAvatar(card.querySelector('.model-card-head .avatar'),m);
     const sync=modelSync(m),field=card.querySelector('.model-input');
     const choices=[{id:'',label:'由 harness 决定'},...(s.catalog||[])];
     if(draft.model&&!choices.some(x=>x.id===draft.model))choices.push({id:draft.model,label:draft.model+'（已设置）'});
@@ -326,9 +329,10 @@ function renderSynchronous() {
 function messageNode(m,article=null) {
   if(!article){
     article=document.createElement('article');article.className='message'+(m.sender_name===state.me.name?' self':'');article.dataset.message=m.id;
-    article.innerHTML=`<div class="avatar ${m.sender_kind==='user'?'human':esc(m.sender_kind)}">${esc(m.sender_name.slice(0,2).toUpperCase())}</div><div class="message-content"><div class="message-meta"><div class="sender-block"><strong>${esc(m.sender_name)}</strong><small class="runtime-meta"></small></div><span class="kind">${m.private_to?'私有 · 仅你与 manager':m.sender_kind==='user'?'管理员':m.sender_kind==='bridge'?'副管理员':'AGENT'}</span><time>${formatTime(m.created)}</time><span class="message-number">#${m.id}</span><span class="message-actions"></span></div><div class="message-body"></div><div class="message-controls"></div></div>`;
+    article.innerHTML=`<div class="avatar"></div><div class="message-content"><div class="message-meta"><div class="sender-block"><strong>${esc(m.sender_name)}</strong><small class="runtime-meta"></small></div><span class="kind">${m.private_to?'私有 · 仅你与 manager':m.sender_kind==='user'?'管理员':m.sender_kind==='bridge'?'副管理员':'AGENT'}</span><time>${formatTime(m.created)}</time><span class="message-number">#${m.id}</span><button type="button" class="message-excerpt" data-fold-message="${m.id}" title="展开这条消息" hidden></button><span class="message-actions"></span></div><div class="message-body"></div><div class="message-controls"></div></div>`;
   }
   article.classList.toggle('private-message',!!m.private_to);
+  paintAvatar(article.querySelector(':scope>.avatar'),state.snapshot?.members.find(member=>member.id===m.sender),{kind:m.sender_kind,harness:m.runtime?.harness,name:m.sender_name});
   const body=article.querySelector('.message-body'),bodyHTML=m.recalled_at?'<span class="recalled-notice">消息已撤回 · 排队任务已取消</span>':`${m.quote?`<blockquote class="quote"><div class="quote-author">${esc(m.quote.name)} · ${formatTime(m.quote.created)}</div>${markdown(m.quote.body.slice(0,700))}</blockquote>`:''}${markdown(m.body)}`;
   if(body.dataset.content!==bodyHTML){body.innerHTML=bodyHTML;body.dataset.content=bodyHTML;}
   article.classList.toggle('recalled-message',!!m.recalled_at);
@@ -342,7 +346,13 @@ function messageNode(m,article=null) {
   article.querySelector('.message-number').textContent=`#${m.id}`+(m.round_mode==='synchronous'&&m.sync_round?` · 第 ${m.sync_round} 轮`:'');
   const controls=article.querySelector('.message-controls');
   const recall=m.recall_option?`<button type="button" class="text-button recall-message" data-recall="${m.id}" aria-label="撤回消息 #${m.id}" title="${esc(m.recall_option.reason)}" ${!m.recall_option.available||state.recalling.has(m.id)?'disabled':''}>${state.recalling.has(m.id)?'撤回中…':'撤回'}</button>`:'';
-  const actions=article.querySelector('.message-actions'),actionsHTML=m.recalled_at?'':`<button class="text-button" data-quote="${m.id}">引用</button>`+recall;
+  // Single-message folding is a per-browser reading choice, stored with the block folds.
+  const folded=!m.recalled_at&&state.readingFolds?.['m'+m.id]===false;
+  article.classList.toggle('folded',folded);
+  const excerpt=article.querySelector('.message-excerpt');excerpt.hidden=!folded;
+  if(folded){const text=m.body.replace(/[#>*_`~|]|\[|\]\([^)]*\)/g,'').replace(/\s+/g,' ').trim().slice(0,200);if(excerpt.textContent!==text)excerpt.textContent=text;}
+  const fold=m.recalled_at?'':`<button type="button" class="text-button message-fold" data-fold-message="${m.id}" aria-expanded="${!folded}" aria-label="${folded?'展开':'折叠'}消息 #${m.id}">${folded?'展开':'折叠'}</button>`;
+  const actions=article.querySelector('.message-actions'),actionsHTML=m.recalled_at?'':`<button class="text-button" data-quote="${m.id}">引用</button>`+recall+fold;
   if(actions.innerHTML!==actionsHTML)actions.innerHTML=actionsHTML;
   const html=m.recalled_at?'':m.deliveries.map(d=>deliveryControl(m,d)).join('')+(m.steers||[]).map(d=>`<span class="delivery steer-receipt ${['rejected','unknown'].includes(d.status)?'error':''}" title="${esc(d.error||'仅确认 harness 接受输入，不代表模型已读或理解')}">Steer → ${esc(d.name)} · #${d.task_message} · ${steerNames[d.status]||esc(d.status)}${d.error?'（'+esc(d.error)+'）':''}</span>`).join('');
   if(controls.innerHTML!==html)controls.innerHTML=html;

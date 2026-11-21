@@ -160,6 +160,14 @@ function initReading() {
   $('reading-selection').onclick=()=>{state.readingSelection=!state.readingSelection;if(!state.readingSelection)state.readingSelected.clear();renderReading();};
   for(const [id,open] of [['expand-selected',true],['collapse-selected',false]])$(id).onclick=safely(async()=>{for(const key of state.readingSelected)state.readingFolds[key]=open;saveReading();renderReading();await loadReadingBodies();});
   $('messages').addEventListener('click',safely(async e=>{
+    const fold=e.target.closest('[data-fold-message]');
+    if(fold){
+      const article=fold.closest('.message'),key='m'+fold.dataset.foldMessage;
+      state.readingActionAnchor={el:article,y:article.getBoundingClientRect().top};
+      if(state.readingFolds[key]===false)delete state.readingFolds[key];else state.readingFolds[key]=false;
+      try{saveReading();renderReading();}finally{state.readingActionAnchor=null;}
+      return;
+    }
     const toggle=e.target.closest('[data-toggle-block]'),segment=e.target.closest('[data-segment]'),summary=e.target.closest('[data-summary-root]'),check=e.target.closest('[data-select-block]');
     if(check){const blocks=state.timeline.blocks.filter(b=>b.type==='round'),key=check.dataset.selectBlock;const from=blocks.findIndex(b=>b.key===state.readingLastSelected),to=blocks.findIndex(b=>b.key===key);const chosen=e.shiftKey&&from>=0?blocks.slice(Math.min(from,to),Math.max(from,to)+1):[blocks[to]];for(const b of chosen){if(check.checked)state.readingSelected.add(b.key);else state.readingSelected.delete(b.key);}state.readingLastSelected=key;renderReading();return;}
     if(summary){summary.disabled=true;await post(`/rooms/${state.room}/summaries`,{root:Number(summary.dataset.summaryRoot),round:Number(summary.dataset.summaryRound)});state.timeline.revision='';await refresh();toast('摘要已交给 manager，仅你可见');return;}
