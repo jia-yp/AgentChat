@@ -128,7 +128,8 @@ function updateReadingPosition() {
 }
 async function jumpReading(blockKey,messageId=null) {
   const room=state.room,block=state.timeline?.blocks.find(b=>b.key===blockKey);if(!block)return;
-  state.readingFolds[block.key]=true;saveReading();$('history-preview').hidden=true;renderReading();await loadReadingBodies();if(room!==state.room)return;
+  // A search hit must show its text, even if that single message was folded.
+  state.readingFolds[block.key]=true;if(messageId)delete state.readingFolds['m'+messageId];saveReading();$('history-preview').hidden=true;renderReading();await loadReadingBodies();if(room!==state.room)return;
   const box=$('messages'),section=box.querySelector(`[data-block="${block.key}"]`),target=messageId?section?.querySelector(`[data-message="${messageId}"]`)||section:section;
   if(target){box.scrollTop+=target.getBoundingClientRect().top-box.getBoundingClientRect().top-12;target.classList.remove('reading-highlight');void target.offsetWidth;target.classList.add('reading-highlight');}
   updateReadingPosition();
