@@ -6,9 +6,10 @@
   const description=byId('round-mode-description'),details=byId('round-details'),budget=byId('round-budget-controls');
   let frame=0,gesture=null;
   function fitInput() {
-    if(!media.matches){input.style.removeProperty('height');return;}
-    const limit=Math.max(40,Math.min(128,(window.visualViewport?.height||innerHeight)*.25));
-    input.style.height='0px';input.style.height=Math.min(limit,Math.max(40,input.scrollHeight))+'px';
+    // Desktop grows from two lines up to a third of the window; phones stay tighter.
+    const view=window.visualViewport?.height||innerHeight,mobile=media.matches;
+    const floor=mobile?40:52,limit=mobile?Math.max(40,Math.min(128,view*.25)):Math.max(floor,Math.min(320,view*.33));
+    input.style.height='0px';input.style.height=Math.min(limit,Math.max(floor,input.scrollHeight))+'px';
   }
   function preserveReading(change) {
     const bottom=box.scrollHeight-box.clientHeight-box.scrollTop<12;
@@ -56,8 +57,7 @@
     });
   }
   toggle.addEventListener('click',()=>setFocused(!document.body.classList.contains('mobile-chat-focus')));
-  input.addEventListener('focus',()=>setFocused(true));input.addEventListener('input',()=>preserveReading(fitInput));
-  box.addEventListener('wheel',()=>setFocused(true),{passive:true});
+  input.addEventListener('focus',()=>setFocused(true));input.addEventListener('input',()=>preserveReading(fitInput));  box.addEventListener('wheel',()=>setFocused(true),{passive:true});
   box.addEventListener('pointerdown',e=>{gesture={interactive:!!e.target.closest('button,input,select,a,label,summary')};},{passive:true});
   box.addEventListener('pointerup',()=>{
     if(gesture&&!gesture.interactive&&!window.getSelection()?.toString())setFocused(true);

@@ -118,7 +118,7 @@ function renderMembers() {
   let previous=null;
   for(const m of members) {
     let card=[...box.children].find(el=>el.dataset.memberId===m.id);
-    if(!card){card=document.createElement('div');card.className='member';card.dataset.memberId=m.id;card.innerHTML='<div class="member-main"></div>';}
+    if(!card){card=document.createElement('div');card.className='member';card.dataset.memberId=m.id;card.innerHTML=`<button type="button" class="member-toggle" aria-expanded="false" aria-label="${esc(m.name)}：展开详情"></button><div class="member-main"></div>`;}
     if((previous?previous.nextElementSibling:box.firstElementChild)!==card){if(previous)previous.after(card);else box.prepend(card);}previous=card;
     const main=card.querySelector('.member-main'),html=`<div class="member-top"><div class="avatar ${m.kind==='user'?'human':m.kind}">${esc(m.name.slice(0,2).toUpperCase())}</div><div class="member-info"><strong>${esc(m.name)}</strong><small>${esc(m.harness || (m.kind==='bridge'?'本地 bridge':'YOU'))} · ${esc(memberStatus(m))}</small></div><i class="status-dot ${m.online?'online':''} ${m.status==='running'?'running':''}"></i></div><p class="member-role">${esc(m.role)}</p>${m.kind==='agent'?`<label class="session-switch roster-switch"><input type="checkbox" role="switch" data-session-switch="${esc(m.id)}" aria-label="启用 ${esc(m.name)}" ${m.paused?'':'checked'}><span>${m.paused?'已关闭':'允许触发'}</span></label>`:''}${m.detail && m.kind==='agent'?`<p class="member-detail">${esc(m.detail)}</p>`:''}${m.kind!=='user'?`<div class="member-actions"><button class="text-button" data-mention="${esc(m.name)}">发给 TA</button>${m.kind==='bridge'?`<button class="text-button" data-member="${esc(m.id)}" data-action="${m.paused?'resume':'pause'}">${m.paused?'恢复':'暂停'}</button>`:''}<button class="text-button" data-member="${esc(m.id)}" data-action="${m.kind==='agent'?'delete':'revoke'}">${m.kind==='agent'?'删除':'撤销'}</button></div>`:''}`;
     if(main.innerHTML!==html)main.innerHTML=html;
@@ -151,7 +151,7 @@ function switchChannel(channel) {
   closeMentions();
   state.channelDrafts.set(state.channel,{text:$('message-input').value,quote:state.quote});
   state.channel=channel;state.pendingSend=null;
-  const draft=state.channelDrafts.get(channel);$('message-input').value=draft?.text||'';state.quote=null;$('quote-preview').hidden=true;
+  const draft=state.channelDrafts.get(channel);$('message-input').value=draft?.text||'';window.AgentChatMobile?.fitInput();state.quote=null;$('quote-preview').hidden=true;
 }
 
 function selectTarget(name,toggle=true) {
@@ -326,8 +326,9 @@ function renderSynchronous() {
 function messageNode(m,article=null) {
   if(!article){
     article=document.createElement('article');article.className='message'+(m.sender_name===state.me.name?' self':'');article.dataset.message=m.id;
-    article.innerHTML=`<div class="avatar ${m.sender_kind==='user'?'human':esc(m.sender_kind)}">${esc(m.sender_name.slice(0,2).toUpperCase())}</div><div class="message-content"><div class="message-meta"><div class="sender-block"><strong>${esc(m.sender_name)}</strong><small class="runtime-meta"></small></div><span class="kind">${m.private_to?'私有 · 仅你与 manager':m.sender_kind==='user'?'管理员':m.sender_kind==='bridge'?'副管理员':'AGENT'}</span><time>${formatTime(m.created)}</time><span class="message-number">#${m.id}</span></div><div class="message-body"></div><div class="message-controls"></div></div>`;
+    article.innerHTML=`<div class="avatar ${m.sender_kind==='user'?'human':esc(m.sender_kind)}">${esc(m.sender_name.slice(0,2).toUpperCase())}</div><div class="message-content"><div class="message-meta"><div class="sender-block"><strong>${esc(m.sender_name)}</strong><small class="runtime-meta"></small></div><span class="kind">${m.private_to?'私有 · 仅你与 manager':m.sender_kind==='user'?'管理员':m.sender_kind==='bridge'?'副管理员':'AGENT'}</span><time>${formatTime(m.created)}</time><span class="message-number">#${m.id}</span><span class="message-actions"></span></div><div class="message-body"></div><div class="message-controls"></div></div>`;
   }
+  article.classList.toggle('private-message',!!m.private_to);
   const body=article.querySelector('.message-body'),bodyHTML=m.recalled_at?'<span class="recalled-notice">消息已撤回 · 排队任务已取消</span>':`${m.quote?`<blockquote class="quote"><div class="quote-author">${esc(m.quote.name)} · ${formatTime(m.quote.created)}</div>${markdown(m.quote.body.slice(0,700))}</blockquote>`:''}${markdown(m.body)}`;
   if(body.dataset.content!==bodyHTML){body.innerHTML=bodyHTML;body.dataset.content=bodyHTML;}
   article.classList.toggle('recalled-message',!!m.recalled_at);
@@ -341,7 +342,9 @@ function messageNode(m,article=null) {
   article.querySelector('.message-number').textContent=`#${m.id}`+(m.round_mode==='synchronous'&&m.sync_round?` · 第 ${m.sync_round} 轮`:'');
   const controls=article.querySelector('.message-controls');
   const recall=m.recall_option?`<button type="button" class="text-button recall-message" data-recall="${m.id}" aria-label="撤回消息 #${m.id}" title="${esc(m.recall_option.reason)}" ${!m.recall_option.available||state.recalling.has(m.id)?'disabled':''}>${state.recalling.has(m.id)?'撤回中…':'撤回'}</button>`:'';
-  const html=m.recalled_at?'':`<button class="text-button" data-quote="${m.id}">引用</button>`+recall+m.deliveries.map(d=>deliveryControl(m,d)).join('')+(m.steers||[]).map(d=>`<span class="delivery steer-receipt ${['rejected','unknown'].includes(d.status)?'error':''}" title="${esc(d.error||'仅确认 harness 接受输入，不代表模型已读或理解')}">Steer → ${esc(d.name)} · #${d.task_message} · ${steerNames[d.status]||esc(d.status)}${d.error?'（'+esc(d.error)+'）':''}</span>`).join('');
+  const actions=article.querySelector('.message-actions'),actionsHTML=m.recalled_at?'':`<button class="text-button" data-quote="${m.id}">引用</button>`+recall;
+  if(actions.innerHTML!==actionsHTML)actions.innerHTML=actionsHTML;
+  const html=m.recalled_at?'':m.deliveries.map(d=>deliveryControl(m,d)).join('')+(m.steers||[]).map(d=>`<span class="delivery steer-receipt ${['rejected','unknown'].includes(d.status)?'error':''}" title="${esc(d.error||'仅确认 harness 接受输入，不代表模型已读或理解')}">Steer → ${esc(d.name)} · #${d.task_message} · ${steerNames[d.status]||esc(d.status)}${d.error?'（'+esc(d.error)+'）':''}</span>`).join('');
   if(controls.innerHTML!==html)controls.innerHTML=html;
   return article;
 }
@@ -365,7 +368,10 @@ async function refresh() {
   $('routing-hint').textContent=manager?'仅你与 manager 可见 · 正文 @ 仅提及':activeSync()?'补充在下一轮处理 · 正文 @ 仅提及':'Enter 发送 · Shift+Enter 换行 · 正文 @ 仅提及';
   await refreshReading(room,generation);
   if(generation!==state.generation)return;
-  $('connection').innerHTML='<i></i> 已连接';
+  setConnection(true);
+}
+function setConnection(ok) {
+  for(const box of [$('connection'),$('room-connection')]){box.classList.toggle('lost',!ok);box.innerHTML=`<i></i><span>${ok?'已连接':'连接中断 · 正在重试'}</span>`;box.title=ok?'已连接':'连接中断 · 正在重试';}
 }
 function insertMention(name) {
   selectTarget(name,false);$('message-input').focus({preventScroll:true});
@@ -543,6 +549,8 @@ $('members-toggle').onclick=()=>$('roster').classList.toggle('open');
 $('close-roster').onclick=()=>$('roster').classList.remove('open');
 $('room-pause').onclick=safely(async()=>{const pause=!state.snapshot.room.paused;if(pause&&!confirm('暂停会取消排队任务，并通知 bridge 停止正在运行的任务。继续？'))return;await post(`/rooms/${state.room}/control`,{action:pause?'pause':'resume'});await refresh();});
 $('members').onclick=safely(async e=>{
+  const toggle=e.target.closest('.member-toggle');
+  if(toggle){const open=toggle.closest('.member').classList.toggle('expanded');toggle.setAttribute('aria-expanded',String(open));return;}
   const mention=e.target.closest('[data-mention]');if(mention) return insertMention(mention.dataset.mention);
   const b=e.target.closest('[data-member]');if(!b)return;
   if(b.dataset.action==='delete')return manageSession(b.dataset.member,'delete');
@@ -744,7 +752,7 @@ $('copy-setup').onclick=safely(async()=>{
 });
 $('select-setup-text').onclick=()=>{$('setup-text').focus();$('setup-text').select();toast('文本已选中，请按 Ctrl+C（Mac 为 ⌘C）复制');};
 $('setup-dialog').addEventListener('input',event=>{if(event.target.matches('#workspace-path,#project-name,#same-as-manager,#api-url')||event.target.closest('.role-row'))clearSetupLink();});
-setInterval(async()=>{if(state.polling || !state.me || document.hidden)return;state.polling=true;try{await refresh();}catch{$('connection').textContent='连接中断 · 正在重试';}finally{state.polling=false;}},2500);
+setInterval(async()=>{if(state.polling || !state.me || document.hidden)return;state.polling=true;try{await refresh();}catch{setConnection(false);}finally{state.polling=false;}},2500);
 initAppearance();
 initMentions();
 initReading();
