@@ -38,7 +38,7 @@ $('choice-input').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDe
 async function api(path, options={}) {
   const response = await fetch('/api'+path,{credentials:'same-origin',headers:{'Content-Type':'application/json'},...options});
   const data=await response.json();
-  if(!response.ok) throw new Error(data.error || (Array.isArray(data.detail)?data.detail.map(x=>x.msg).join('; '):'请求失败'));
+  if(!response.ok){const error=new Error(data.error || (Array.isArray(data.detail)?data.detail.map(x=>x.msg).join('; '):'请求失败'));error.status=response.status;throw error;}
   return data;
 }
 const post=(path,body={})=>api(path,{method:'POST',body:JSON.stringify(body)});
@@ -64,6 +64,7 @@ async function boot() {
 async function loggedIn() {
   $('auth').hidden=true; $('shell').hidden=false; $('user-name').textContent=state.me.name;
   document.querySelector('.user-row .avatar').textContent=state.me.name.slice(0,1).toUpperCase();
+  if(await showGuestJoin())return;
   await listRooms();
 }
 async function listRooms() {
@@ -73,6 +74,7 @@ async function listRooms() {
 }
 function readRoute() {const m=location.hash.match(/^#room\/([a-f0-9]+)(\/manage)?$/);return m?{id:m[1],view:m[2]?'manage':'chat'}:null;}
 function showView(view,writeRoute=true) {
+  if(view==='manage'&&state.snapshot&&!roomOwner())view='chat';
   closeMentions();
   state.view=view;
   window.AgentChatMobile?.reset();
@@ -100,7 +102,7 @@ function memberStatus(m) {
   if(m.revoked) return '已撤销';
   if(m.paused) return m.disabled_reason==='rate_limit'?'已自动关闭 · rate limit':'已关闭';
   if(state.snapshot.room.paused)return '群聊已暂停';
-  if(m.kind==='user') return '管理员';
+  if(m.kind==='user') return humanRole(m);
   if(!m.online) return m.enabled?'bridge 离线':'等待首次 @ · bridge 离线';
   return statusNames[m.status] || m.status;
 }
@@ -119,16 +121,17 @@ function renderMembers() {
   for(const m of members) {
     let card=[...box.children].find(el=>el.dataset.memberId===m.id);
     if(!card){card=document.createElement('div');card.className='member';card.dataset.memberId=m.id;card.innerHTML=`<button type="button" class="member-toggle" aria-expanded="false" aria-label="${esc(m.name)}：展开详情"></button><div class="member-main"></div>`;}
+    card.querySelector('.member-toggle').setAttribute('aria-label',`${m.name}：展开详情`);
     if((previous?previous.nextElementSibling:box.firstElementChild)!==card){if(previous)previous.after(card);else box.prepend(card);}previous=card;
-    const main=card.querySelector('.member-main'),html=`<div class="member-top">${avatarHTML(m)}<div class="member-info"><strong>${esc(m.name)}</strong><small>${esc(m.harness || (m.kind==='bridge'?'本地 bridge':'YOU'))} · ${esc(memberStatus(m))}</small></div><i class="status-dot ${m.online?'online':''} ${m.status==='running'?'running':''}"></i></div><p class="member-role">${esc(m.role)}</p>${m.kind==='agent'?`<label class="session-switch roster-switch"><input type="checkbox" role="switch" data-session-switch="${esc(m.id)}" aria-label="启用 ${esc(m.name)}" ${m.paused?'':'checked'}><span>${m.paused?'已关闭':'允许触发'}</span></label>`:''}${m.detail && m.kind==='agent'?`<p class="member-detail">${esc(m.detail)}</p>`:''}${m.kind!=='user'?`<div class="member-actions"><button class="text-button" data-mention="${esc(m.name)}">发给 TA</button>${m.kind==='bridge'?`<button class="text-button" data-member="${esc(m.id)}" data-action="${m.paused?'resume':'pause'}">${m.paused?'恢复':'暂停'}</button>`:''}<button class="text-button" data-member="${esc(m.id)}" data-action="${m.kind==='agent'?'delete':'revoke'}">${m.kind==='agent'?'删除':'撤销'}</button></div>`:''}`;
+    const main=card.querySelector('.member-main'),html=`<div class="member-top">${avatarHTML(m)}<div class="member-info"><strong>${esc(m.name)}</strong><small>${esc(m.harness || (m.kind==='bridge'?'本地 bridge':'人类'))} · ${esc(memberStatus(m))}</small></div><i class="status-dot ${m.online?'online':''} ${m.status==='running'?'running':''}"></i></div><p class="member-role">${esc(m.role)}</p>${m.kind==='agent'&&roomOwner()?`<label class="session-switch roster-switch"><input type="checkbox" role="switch" data-session-switch="${esc(m.id)}" aria-label="启用 ${esc(m.name)}" ${m.paused?'':'checked'}><span>${m.paused?'已关闭':'允许触发'}</span></label>`:''}${m.detail && m.kind==='agent'?`<p class="member-detail">${esc(m.detail)}</p>`:''}${m.kind!=='user'&&roomOwner()?`<div class="member-actions"><button class="text-button" data-mention="${esc(m.name)}">发给 TA</button>${m.kind==='bridge'?`<button class="text-button" data-member="${esc(m.id)}" data-action="${m.paused?'resume':'pause'}">${m.paused?'恢复':'暂停'}</button>`:''}<button class="text-button" data-member="${esc(m.id)}" data-action="${m.kind==='agent'?'delete':'revoke'}">${m.kind==='agent'?'删除':'撤销'}</button></div>`:''}${guestMemberActions(m)}`;
     if(main.innerHTML!==html)main.innerHTML=html;
     renderMemberColors(card,m);
-    if(m.kind==='user'&&m.name===state.me.name)paintAvatar(document.querySelector('.user-row .avatar'),m);
+    if(m.id===s.viewer.member_id)paintAvatar(document.querySelector('.user-row .avatar'),m);
   }
-  renderTargets(agents);
+  renderTargets(members.filter(m=>m.kind!=='bridge'&&m.id!==s.viewer.member_id));
 }
 
-function renderTargets(agents=state.snapshot.members.filter(m=>m.kind==='agent'&&!m.revoked)) {
+function renderTargets(agents=state.snapshot.members.filter(m=>m.kind!=='bridge'&&!m.revoked&&m.id!==state.snapshot.viewer.member_id)) {
   const allowed=['all',...state.snapshot.members.filter(m=>!m.revoked).map(m=>m.name)];
   state.targets=new Set([...state.targets].filter(n=>allowed.includes(n)));
   if(!state.targets.size)state.targets.add('all');
@@ -320,18 +323,21 @@ function renderSynchronous() {
   const waiting=(run?.participants||[]).filter(p=>['pending','running'].includes(p.status)).map(p=>p.name);
   const text=run.recovering?.length?run.recovering.map(r=>`${r.manager} 正在处理 @${r.member} 的异常`).join('；'):run.reason||(waiting.length?'等待：'+waiting.join('、'):'本轮已完成');
   $('sync-summary').textContent=text;$('sync-summary').title=text;
-  $('sync-continue').hidden=run.status!=='blocked'&&!run.recovering?.length;$('sync-continue').disabled=state.syncBusy;
+  $('sync-continue').hidden=!roomOwner()||(run.status!=='blocked'&&!run.recovering?.length);$('sync-continue').disabled=state.syncBusy;
   $('sync-continue').textContent='直接进入下一轮';
   const names={pending:'待开始',running:'工作中',done:'已完成',failed:'失败',skipped:'已跳过'};
-  const html=(run?.participants||[]).map(p=>`<div class="sync-person ${esc(p.status)}" title="${esc(p.error||'')}"><strong>${esc(p.name)}</strong><span>${p.used}/${p.quota} 次 · ${names[p.status]}</span>${p.status==='failed'?`<button type="button" class="text-button" data-sync-retry="${esc(p.delivery)}" ${state.syncBusy?'disabled':''}>重试</button>`:''}</div>`).join('');
+  const html=(run?.participants||[]).map(p=>`<div class="sync-person ${esc(p.status)}" title="${esc(p.error||'')}"><strong>${esc(p.name)}</strong><span>${p.used}/${p.quota} 次 · ${names[p.status]}</span>${p.status==='failed'&&roomOwner()?`<button type="button" class="text-button" data-sync-retry="${esc(p.delivery)}" ${state.syncBusy?'disabled':''}>重试</button>`:''}</div>`).join('');
   if($('sync-participants').innerHTML!==html)$('sync-participants').innerHTML=html;
 }
 function messageNode(m,article=null) {
   if(!article){
-    article=document.createElement('article');article.className='message'+(m.sender_name===state.me.name?' self':'');article.dataset.message=m.id;
-    article.innerHTML=`<div class="avatar"></div><div class="message-content"><div class="message-meta"><div class="sender-block"><strong>${esc(m.sender_name)}</strong><small class="runtime-meta"></small></div><span class="kind">${m.private_to?'私有 · 仅你与 manager':m.sender_kind==='user'?'管理员':m.sender_kind==='bridge'?'副管理员':'AGENT'}</span><time>${formatTime(m.created)}</time><span class="message-number">#${m.id}</span><button type="button" class="message-excerpt" data-fold-message="${m.id}" title="展开这条消息" hidden></button><span class="message-actions"></span></div><div class="message-body"></div><div class="message-controls"></div></div>`;
+    article=document.createElement('article');article.className='message'+(m.sender===state.snapshot?.viewer?.member_id?' self':'');article.dataset.message=m.id;
+    article.innerHTML=`<div class="avatar"></div><div class="message-content"><div class="message-meta"><div class="sender-block"><strong>${esc(m.sender_name)}</strong><small class="runtime-meta"></small></div><span class="kind">${m.private_to?'私有 · 仅你与 manager':m.sender_kind==='user'?humanRole(state.snapshot?.members.find(member=>member.id===m.sender)):m.sender_kind==='bridge'?'副管理员':'AGENT'}</span><time>${formatTime(m.created)}</time><span class="message-number">#${m.id}</span><button type="button" class="message-excerpt" data-fold-message="${m.id}" title="展开这条消息" hidden></button><span class="message-actions"></span></div><div class="message-body"></div><div class="message-controls"></div></div>`;
   }
   article.classList.toggle('private-message',!!m.private_to);
+  article.classList.toggle('self',m.sender===state.snapshot?.viewer?.member_id);
+  article.querySelector('.sender-block strong').textContent=m.sender_name;
+  if(m.sender_kind==='user'&&!m.private_to)article.querySelector('.kind').textContent=humanRole(state.snapshot?.members.find(member=>member.id===m.sender));
   paintAvatar(article.querySelector(':scope>.avatar'),state.snapshot?.members.find(member=>member.id===m.sender),{kind:m.sender_kind,harness:m.runtime?.harness,name:m.sender_name});
   const body=article.querySelector('.message-body'),bodyHTML=m.recalled_at?'<span class="recalled-notice">消息已撤回 · 排队任务已取消</span>':`${m.quote?`<blockquote class="quote"><div class="quote-author">${esc(m.quote.name)} · ${formatTime(m.quote.created)}</div>${markdown(m.quote.body.slice(0,700))}</blockquote>`:''}${markdown(m.body)}`;
   if(body.dataset.content!==bodyHTML){body.innerHTML=bodyHTML;body.dataset.content=bodyHTML;}
@@ -352,7 +358,7 @@ function messageNode(m,article=null) {
   const excerpt=article.querySelector('.message-excerpt');excerpt.hidden=!folded;
   if(folded){const text=m.body.replace(/[#>*_`~|]|\[|\]\([^)]*\)/g,'').replace(/\s+/g,' ').trim().slice(0,200);if(excerpt.textContent!==text)excerpt.textContent=text;}
   const fold=m.recalled_at?'':`<button type="button" class="text-button message-fold" data-fold-message="${m.id}" aria-expanded="${!folded}" aria-label="${folded?'展开':'折叠'}消息 #${m.id}">${folded?'展开':'折叠'}</button>`;
-  const actions=article.querySelector('.message-actions'),actionsHTML=m.recalled_at?'':`<button class="text-button" data-quote="${m.id}">引用</button>`+recall+fold;
+  const actions=article.querySelector('.message-actions'),actionsHTML=m.recalled_at?'':(canSpeak()?`<button class="text-button" data-quote="${m.id}">引用</button>`:'')+recall+fold;
   if(actions.innerHTML!==actionsHTML)actions.innerHTML=actionsHTML;
   const html=m.recalled_at?'':m.deliveries.map(d=>deliveryControl(m,d)).join('')+(m.steers||[]).map(d=>`<span class="delivery steer-receipt ${['rejected','unknown'].includes(d.status)?'error':''}" title="${esc(d.error||'仅确认 harness 接受输入，不代表模型已读或理解')}">Steer → ${esc(d.name)} · #${d.task_message} · ${steerNames[d.status]||esc(d.status)}${d.error?'（'+esc(d.error)+'）':''}</span>`).join('');
   if(controls.innerHTML!==html)controls.innerHTML=html;
@@ -362,10 +368,11 @@ function renderMessages(forceBottom=false) {renderReading(forceBottom);}
 async function refresh() {
   if(!state.room || !state.me) return;
   const room=state.room;let generation=state.generation;
-  const snap=await api(`/rooms/${room}`);
+  let snap;try{snap=await api(`/rooms/${room}`);}catch(error){if([403,404].includes(error.status)&&state.room===room&&generation===state.generation){await leaveUnavailableRoom();return;}throw error;}
   if(generation!==state.generation) return;
   const changed=JSON.stringify(snap)!==JSON.stringify(state.snapshot);
   state.snapshot=snap;
+  applyGuestPermissions();
   if(!state.roundsDirty&&!$('rounds-dialog').open&&document.activeElement!==$('max-rounds')){$('max-rounds').value=snap.room.max_rounds??8;$('round-mode').value=snap.room.round_mode||'global';state.sessionRounds={...snap.room.session_rounds};state.sessionSpeaks={...snap.room.session_speaks};}
   if(activeSync()){$('max-rounds').value=activeSync().maximum;$('round-mode').value='synchronous';state.sessionSpeaks={...activeSync().allowances};}
   renderRoundMode();
@@ -515,7 +522,7 @@ $('setup-open').onclick=showSetup;
 $('manage-open').onclick=()=>showView('manage');
 $('manage-back').onclick=()=>showView('chat');
 $('manage-setup').onclick=showSetup;
-window.addEventListener('hashchange',safely(async()=>{const route=readRoute();if(state.me&&route)await selectRoom(route.id,route.view,false);else if(!state.me)displayAuth();}));
+window.addEventListener('hashchange',safely(async()=>{rememberInvitation();if(state.me&&state.guestInviteToken){await showGuestJoin();return;}const route=readRoute();if(state.me&&route)await selectRoom(route.id,route.view,false);else if(!state.me)displayAuth();}));
 $('manage-agents').addEventListener('input',e=>{
   if(e.target.matches('.permission-input')){
     const draft=state.permissionDrafts.get(e.target.closest('[data-agent]').dataset.agent);draft.mode=e.target.value;draft.dirty=true;renderManagement();return;
@@ -609,6 +616,7 @@ function renderRoundMode() {
   window.AgentChatMobile?.update();
 }
 function saveRoundLimit(room,value,mode=$('round-mode').value,limits={...state.sessionRounds},speaks={...state.sessionSpeaks}) {
+  if(!roomOwner()){state.roundsDirty=true;return Promise.resolve();}
   roundSaveQueue=roundSaveQueue.catch(()=>{}).then(async()=>{
     await api(`/rooms/${room}/round-limit`,{method:'PUT',body:JSON.stringify({max_rounds:value,round_mode:mode,session_rounds:limits,session_speaks:speaks})});
     if(state.room===room&&Number($('max-rounds').value)===value&&$('round-mode').value===mode){state.roundsDirty=false;Object.assign(state.snapshot.room,{max_rounds:value,round_mode:mode,session_rounds:limits,session_speaks:speaks});}
@@ -659,11 +667,11 @@ $('composer').addEventListener('submit',safely(async e=>{
   const body=to.map(n=>'@'+n).join(' ')+'\n'+text;
   const payload={body,to,reply_to,max_rounds,round_mode,session_rounds,session_speaks};
   if(!state.pendingSend||JSON.stringify({...state.pendingSend,nonce:undefined})!==JSON.stringify(payload))state.pendingSend={...payload,nonce:crypto.randomUUID?crypto.randomUUID():`${Date.now()}-${Math.random()}`};
-  const pending=state.pendingSend;$('send').disabled=true;
+  const pending=state.pendingSend;state.sending=true;$('send').disabled=true;
   try {
     await post(`/rooms/${room}/messages`,pending);
     if(state.room===room&&state.channel===channel){if(state.pendingSend===pending)state.pendingSend=null;if($('message-input').value.trim()===text)$('message-input').value='';if(state.quote?.id===reply_to){state.quote=null;$('quote-preview').hidden=true;}await refresh();renderMessages(true);}
-  } finally {$('send').disabled=false;window.AgentChatMobile?.fitInput();}
+  } finally {state.sending=false;$('send').disabled=!canSpeak();window.AgentChatMobile?.fitInput();}
 }));
 $('message-input').addEventListener('keydown',e=>{if(!e.defaultPrevented&&e.key==='Enter'&&!e.shiftKey&&!e.isComposing&&e.keyCode!==229){e.preventDefault();if(!e.repeat&&!$('send').disabled)$('composer').requestSubmit();}});
 $('max-rounds').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();e.target.blur();}});
@@ -766,4 +774,5 @@ setInterval(async()=>{if(state.polling || !state.me || document.hidden)return;st
 initAppearance();
 initMentions();
 initReading();
+initGuestUI();
 boot();

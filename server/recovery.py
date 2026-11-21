@@ -29,7 +29,7 @@ def queue(db,source):
         AND m.paused=0 AND m.revoked=0 AND b.paused=0 AND b.revoked=0 AND b.last_seen>=?
         ORDER BY m.created LIMIT 1""",(d['room'],member['bridge'],time.time()-45)).fetchone()
     if not manager:return
-    owner=db.execute("SELECT id,name FROM members WHERE room=? AND kind='user'",(d['room'],)).fetchone()
+    owner=db.execute("SELECT id,name FROM members WHERE room=? AND id=(SELECT owner||':'||id FROM rooms WHERE id=members.room)",(d['room'],)).fetchone()
     rid=secrets.token_hex(12);did=secrets.token_hex(12);now=time.time()
     facts={'session':member['name'],'harness':member['harness'],'message_id':message['id'],
            'error':d['error'],'attempt':d['attempts'],'original_task':message['body']}
@@ -112,7 +112,7 @@ def followup(db,r,source):
             WHERE COALESCE(m.root,m.id)=? AND d.member=?''',(root,r['member'])).fetchone()[0]
         if maximum and used>=maximum:return None,'已达到管理员设定的个人额度'
     elif m['max_rounds'] and depth>=m['max_rounds']:return None,'已达到管理员设定的接力上限'
-    owner=db.execute("SELECT id FROM members WHERE room=? AND kind='user'",(r['room'],)).fetchone()[0]
+    owner=db.execute("SELECT id FROM members WHERE room=? AND id=(SELECT owner||':'||id FROM rooms WHERE id=members.room)",(r['room'],)).fetchone()[0]
     original=m['body']
     if source['sync_root']:
         original='\n\n'.join(f"#{x['id']} {x['body']}" for x in db.execute('''SELECT m.id,m.body FROM messages m JOIN deliveries d ON d.message=m.id
@@ -161,7 +161,7 @@ def finish(store,db,delivery,manager,body,runtime=None):
     elif include:follow,applied=followup(db,r,source)
     else:applied='本轮异常处理已结束，后续对话继续'
     db.execute("UPDATE error_recoveries SET status='resolved',action=?,detail=?,followup=?,updated=? WHERE id=?",(action,reason,follow,time.time(),r['id']))
-    owner=db.execute("SELECT name FROM members WHERE room=? AND kind='user'",(r['room'],)).fetchone()[0]
+    owner=db.execute("SELECT name FROM members WHERE room=? AND id=(SELECT owner||':'||id FROM rooms WHERE id=members.room)",(r['room'],)).fetchone()[0]
     target=db.execute('SELECT name FROM members WHERE id=?',(r['member'],)).fetchone()[0]
     text=f'@{owner} 已处理 @{target} 的异常：{applied}。'+('\n'+reason if reason else '')
     store.post_in(db,r['room'],manager,text,'recovery-result:'+r['id'],cause=r['request'],runtime=runtime,_recovery=True)

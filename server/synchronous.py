@@ -188,11 +188,12 @@ def payload(store,db,delivery,actor):
 
 
 def view(db,room_id,actor):
+    from .guests import owner
     if actor.get('session_type')=='manager':return None
     row=db.execute('SELECT * FROM sync_runs WHERE room=? ORDER BY root DESC LIMIT 1',(room_id,)).fetchone()
     if not row:return None
     result=dict(row);result['allowances']=json.loads(result['allowances'])
-    if actor['kind']=='user':result['recovering']=recovery.waiting(db,row['root'],row['round'])
+    if owner(actor,room_id):result['recovering']=recovery.waiting(db,row['root'],row['round'])
     result['participants']=[dict(p) for p in db.execute('''SELECT p.member,p.delivery,m.name,p.quota,p.used,p.status,p.error
         FROM sync_participants p JOIN members m ON m.id=p.member WHERE p.root=? AND p.round=? ORDER BY m.name''',(row['root'],row['round']))]
     return result

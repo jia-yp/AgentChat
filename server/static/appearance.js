@@ -72,7 +72,7 @@ function repaintMemberAvatar(id) {
   for(const article of document.querySelectorAll(`.message[data-sender="${id}"]`))paintAvatar(article.querySelector(':scope>.avatar'),member);
   const card=[...$('members').children].find(el=>el.dataset.memberId===id);
   if(card){paintAvatar(card.querySelector('.member-top .avatar'),member);renderMemberColors(card,member);}
-  if(member.kind==='user'&&member.name===state.me?.name)paintAvatar(document.querySelector('.user-row .avatar'),member);
+  if(member.id===state.snapshot?.viewer?.member_id)paintAvatar(document.querySelector('.user-row .avatar'),member);
 }
 function setMemberAvatar(id,value) {
   const room=state.room,key=`${room}:${id}`,member=state.snapshot?.members.find(m=>m.id===id);
@@ -108,10 +108,12 @@ function applyBubbleColor(element,color) {
 }
 function renderMemberColors(card,member) {
   if(!['agent','user'].includes(member.kind))return;
-  const agent=member.kind==='agent';
+  if(!canEditAppearance(member)){card.querySelector('.member-colors')?.remove();card.querySelector('.member-color-trigger')?.remove();card.classList.remove('has-color');return;}
+  const agent=true;
   card.classList.add('has-color');
   let trigger=card.querySelector('.member-color-trigger');
   let palette=card.querySelector('.member-colors');
+  if(palette&&palette.dataset.appearanceName!==member.name){closeMemberColors(palette);palette.remove();trigger.remove();palette=null;trigger=null;}
   if(!palette){
     trigger=document.createElement('button');trigger.type='button';trigger.className='member-color-trigger';trigger.innerHTML='<span></span>外观';trigger.setAttribute('aria-label',`设置 ${member.name} 的头像${agent?'和气泡颜色':''}`);trigger.setAttribute('aria-haspopup','dialog');trigger.setAttribute('aria-expanded','false');trigger.setAttribute('aria-controls',`member-colors-${member.id}`);
     palette=document.createElement('div');palette.className='member-colors';palette.id=`member-colors-${member.id}`;palette.dataset.colorMember=member.id;palette.setAttribute('role','dialog');palette.setAttribute('aria-label',`${member.name} 外观`);palette.setAttribute('popover','auto');palette.hidden=true;
@@ -120,6 +122,7 @@ function renderMemberColors(card,member) {
     palette.innerHTML=`<div class="color-heading"><strong>${esc(member.name)} · 外观</strong><button type="button" class="color-close" aria-label="关闭外观设置">×</button></div><span class="appearance-label">头像</span><div class="avatar-choices">${avatarChoices}</div><div class="avatar-custom"><input class="avatar-text" type="text" data-avatar-text maxlength="2" placeholder="1–2 个字" aria-label="${esc(member.name)} 文字头像" autocomplete="off"><label class="secondary avatar-upload">上传图片<input type="file" accept="image/png,image/jpeg,image/webp,image/gif" data-avatar-file hidden></label></div>${colors}`;
     for(const button of palette.querySelectorAll('.color-swatch'))button.style.setProperty('--swatch',button.dataset.bubblePreset);
     palette.addEventListener('toggle',()=>trigger.setAttribute('aria-expanded',String(colorPaletteOpen(palette))));
+    palette.dataset.appearanceName=member.name;
     card.appendChild(trigger);
     card.appendChild(palette);
   }

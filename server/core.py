@@ -11,7 +11,7 @@ from pathlib import Path
 
 from bridge.names import NAME_PATTERN, normalize_name
 from bridge.roles import worker_roles
-from . import steering, permissions, synchronous, reading, recall, recovery, session_changes
+from . import steering, permissions, synchronous, reading, recall, recovery, session_changes, guests
 
 LEASE_SECONDS=90
 
@@ -62,12 +62,12 @@ def is_manager(actor):
 
 
 def manages_member(actor, member):
-    return actor['kind']=='user' or (actor['kind']=='bridge' and member.get('bridge')==actor['id']) or (
+    return guests.owner(actor,member['room']) or (actor['kind']=='bridge' and member.get('bridge')==actor['id']) or (
         is_manager(actor) and member.get('bridge')==actor.get('bridge') and member['kind']=='agent')
 
 
 def visible_message(actor, row):
-    return not row['private_to'] or actor['kind']=='user' or (is_manager(actor) and row['private_to']==actor['id'])
+    return not row['private_to'] or guests.owner(actor,row['room']) or (is_manager(actor) and row['private_to']==actor['id'])
 
 
 def valid_credential(value):
@@ -142,6 +142,7 @@ class Store:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         with self.tx() as db:
             db.executescript(SCHEMA)
+            db.executescript(guests.SCHEMA)
             db.executescript(permissions.SCHEMA)
             db.executescript(synchronous.SCHEMA)
             db.executescript(recovery.SCHEMA)
@@ -149,7 +150,7 @@ class Store:
             steering.initialize(db)
             for table,columns in {
                 'rooms':{'max_rounds':'INTEGER NOT NULL DEFAULT 8','round_mode':"TEXT NOT NULL DEFAULT 'global'",'session_rounds':"TEXT NOT NULL DEFAULT '{}'",'session_speaks':"TEXT NOT NULL DEFAULT '{}'"},
-                'members':{'runtime':"TEXT NOT NULL DEFAULT '{}'",'session_type':"TEXT NOT NULL DEFAULT 'worker'",'disabled_reason':"TEXT NOT NULL DEFAULT ''",'steer_supported':'INTEGER NOT NULL DEFAULT 0','sync_supported':'INTEGER NOT NULL DEFAULT 0',
+                'members':{'human_role':"TEXT NOT NULL DEFAULT ''",'runtime':"TEXT NOT NULL DEFAULT '{}'",'session_type':"TEXT NOT NULL DEFAULT 'worker'",'disabled_reason':"TEXT NOT NULL DEFAULT ''",'steer_supported':'INTEGER NOT NULL DEFAULT 0','sync_supported':'INTEGER NOT NULL DEFAULT 0',
                            'deleted_at':'REAL NOT NULL DEFAULT 0','lifecycle_supported':'INTEGER NOT NULL DEFAULT 0','summary_supported':'INTEGER NOT NULL DEFAULT 0','bubble_color':"TEXT NOT NULL DEFAULT ''",'avatar':"TEXT NOT NULL DEFAULT ''",'claims_paused_until':'REAL NOT NULL DEFAULT 0'},
                 'messages':{'max_rounds':'INTEGER NOT NULL DEFAULT 8','stopped':'INTEGER NOT NULL DEFAULT 0',
                             'runtime':"TEXT NOT NULL DEFAULT '{}'",'recipient_names':"TEXT NOT NULL DEFAULT ''",'private_to':"TEXT NOT NULL DEFAULT ''",
@@ -208,10 +209,16 @@ class Store:
                     return {'id': row['id'], 'name': row['name'], 'kind': 'user'}
         raise Problem('请登录或提供有效 token', 401)
 
-    def access(self, db, room_id, actor, manage=False):
+    def access(self, db, room_id, actor, manage=True):
         room = self.room(db, room_id)
         if actor['kind'] == 'user':
-            if room['owner'] != actor['id']:
+            actor['_access_room']=room_id
+            actor['_room_role']=''
+            if room['owner']==actor['id']:actor['_room_role']='owner'
+            else:
+                member=db.execute("SELECT human_role FROM members WHERE id=? AND room=? AND kind='user' AND revoked=0",(actor['id']+':'+room_id,room_id)).fetchone()
+                if member:actor['_room_role']=member['human_role']
+            if not actor['_room_role'] or (manage and actor['_room_role']!='owner'):
                 raise Problem('无权访问这个群聊', 403)
         elif actor['room'] != room_id or (manage and actor['kind'] != 'bridge' and not is_manager(actor)):
             raise Problem('权限不足', 403)
@@ -450,7 +457,7 @@ class Store:
             # A late completion must not invalidate a newer invitation.
             rotated=db.execute('UPDATE rooms SET join_hash=? WHERE id=? AND join_hash=?',(digest(token()),row['room'],row['token_hash'])).rowcount>0
             db.execute("UPDATE setup_requests SET status='complete',detail='',completed=?,token_rotated=? WHERE id=?",(now,int(rotated),request_id))
-            owner=db.execute("SELECT name FROM members WHERE room=? AND kind='user'",(row['room'],)).fetchone()
+            owner=db.execute("SELECT name FROM members WHERE room=? AND id=(SELECT owner||':'||id FROM rooms WHERE id=members.room)",(row['room'],)).fetchone()
             manager_note=f"；@{manager['name']} 已就绪，可单独向它发送私有管理任务" if manager else ''
             self.post_in(db,row['room'],bridge,f"@{owner['name']} 本地 setup 已完成，{len(expected)} 个协作 session 已接入{manager_note}。未启用的 session 等待你的首次 @；本次接入链接已失效。",'setup-complete:'+request_id)
             return {'ok':True,'completed':now,'token_rotated':rotated}
@@ -560,7 +567,7 @@ class Store:
         msg['runtime']={**json.loads(msg['runtime']),'harness':sender['harness']}
         msg['session_rounds']=json.loads(msg['session_rounds'])
         msg['session_speaks']=json.loads(msg['session_speaks'])
-        if actor and actor['kind']!='user':
+        if actor and not guests.owner(actor,msg['room']):
             hidden={r['id'] for r in db.execute("SELECT id FROM members WHERE room=? AND session_type='manager' AND id!=?",(msg['room'],actor['id']))}
             msg['session_rounds']={k:v for k,v in msg['session_rounds'].items() if k not in hidden}
         msg.pop('recipient_names',None)
@@ -568,13 +575,13 @@ class Store:
         if msg['reply_to']:
             quote = db.execute('SELECT m.id,m.body,m.created,s.name FROM messages m JOIN members s ON s.id=m.sender WHERE m.id=? AND m.room=?',(msg['reply_to'],msg['room'])).fetchone()
             original=db.execute('SELECT * FROM messages WHERE id=?',(msg['reply_to'],)).fetchone()
-            msg['quote'] = dict(quote) if quote and (not actor or synchronous.readable(db,actor,original)) else None
+            msg['quote'] = dict(quote) if quote and (not actor or (visible_message(actor,original) and synchronous.readable(db,actor,original))) else None
             if msg['quote'] and original['recalled_at']:
                 msg['quote']['body']=recall.NOTICE;msg['quote']['recalled_at']=original['recalled_at']
         msg['deliveries'] = [dict(x) for x in db.execute('SELECT d.id,d.member,s.name,d.status,d.error,d.attempts FROM deliveries d JOIN members s ON s.id=d.member WHERE d.message=?',(msg['id'],))]
         for delivery in msg['deliveries']:
             delivery['steer_option']=steering.offer(db,actor,row,delivery)
-            if delivery['status']=='failed':delivery['retryable']=msg['message_kind']!='session_change_request' and synchronous.retryable(db,delivery['id'])
+            if delivery['status']=='failed':delivery['retryable']=bool(actor and guests.owner(actor,msg['room']) and msg['message_kind']!='session_change_request' and synchronous.retryable(db,delivery['id']))
         msg['steers']=steering.receipts(db,msg['id'])
         msg['recall_option']=recall.option(db,actor,row)
         if msg['recalled_at']:
@@ -582,7 +589,8 @@ class Store:
         return msg
 
     def post_in(self, db, room_id, actor, body, nonce, reply_to=None, cause=None, to=None, max_rounds=None, runtime=None, round_mode=None, session_rounds=None, delivery_mode='normal', steer_task='', session_speaks=None, _summary=False, _recovery=False):
-        room = self.access(db, room_id, actor)
+        room = self.access(db, room_id, actor,manage=False)
+        if actor['kind']=='user' and actor['_room_role']=='observer':raise Problem('观察者只能阅读；请联系创建者调整为参与者',403)
         synchronous.settle(db,room_id)
         steering.settle(db)
         if delivery_mode not in ('normal','steer'):raise Problem('未知的消息投递模式')
@@ -642,22 +650,22 @@ class Store:
             raise Problem('本轮协作已停止，请等待管理员发送新任务',409)
         meta=valid_runtime(runtime if runtime is not None else json.loads(actor.get('runtime','{}')),actor.get('harness','')) if actor['kind']=='agent' else {}
         members = [dict(r) for r in db.execute('SELECT * FROM members WHERE room=? AND revoked=0',(room_id,))]
-        by_name = {m['name']:m for m in members if actor['kind']=='user' or is_manager(actor) or m['session_type']!='manager'}
-        owner = next(m for m in members if m['kind']=='user')
+        by_name = {m['name']:m for m in members if guests.owner(actor,room_id) or is_manager(actor) or (m['session_type']!='manager' and m['kind']!='bridge')}
+        owner = next(m for m in members if m['id']==room['owner']+':'+room_id)
         targets = {}
         for name in names:
             if name in ('all','everyone','所有人','全体'):
-                targets.update({m['id']:m for m in members if m['id']!=sender and m['session_type']!='manager'})
+                targets.update({m['id']:m for m in members if m['id']!=sender and m['session_type']!='manager' and m['kind']!='bridge'})
             else:
-                target = owner if name in ('admin','管理员') else by_name.get(name)
+                target = owner if name in ('admin','管理员') else guests.reply_recipient(db,actor,parent,name) or by_name.get(name)
                 if not target:
                     raise Problem('收件人不存在：@'+name)
                 targets[target['id']]=target
         managers=[m for m in targets.values() if m['session_type']=='manager']
         private_to=actor['id'] if is_manager(actor) else (managers[0]['id'] if managers else '')
-        if managers and (actor['kind']!='user' or len(managers)!=1 or any(m['kind']!='user' and m['id']!=private_to for m in targets.values())):
+        if managers and (not guests.owner(actor,room_id) or len(managers)!=1 or any(m['id'] not in (owner['id'],private_to) for m in targets.values())):
             raise Problem('manager 只能由管理员单独点名，不能与 worker 或所有人混发')
-        if is_manager(actor) and any(m['kind']!='user' for m in targets.values()):raise Problem('manager 回复仅管理员可见，请发送给 @管理员')
+        if is_manager(actor) and any(m['id']!=owner['id'] for m in targets.values()):raise Problem('manager 回复仅管理员可见，请发送给 @管理员')
         for reference in (parent,db.execute('SELECT * FROM messages WHERE id=?',(reply_to,)).fetchone() if reply_to else None):
             if reference and reference['private_to'] and reference['private_to']!=private_to:raise Problem('不能将 manager 私聊转发或引用到其他对话',403)
         target_names = [t['name'] for t in targets.values()]
@@ -711,17 +719,20 @@ class Store:
 
     def snapshot(self, room_id, actor):
         with self.tx() as db:
-            room = self.access(db,room_id,actor)
+            room = self.access(db,room_id,actor,manage=False)
             room.pop('join_hash')
             synchronous.settle(db,room_id)
             steering.settle(db)
             if actor['kind']=='user':reading.settle(self,db,room_id)
             session_changes.settle(db,room_id)
-            members = [dict(m) for m in db.execute('SELECT id,name,kind,role,harness,bridge,enabled,paused,revoked,status,last_seen,native_id,detail,runtime,session_type,disabled_reason,steer_supported,sync_supported,created,deleted_at,lifecycle_supported,bubble_color,avatar,token_hash IS NOT NULL AS has_credential FROM members WHERE room=?',(room_id,))]
-            members=[m for m in members if m['session_type']!='manager' or actor['kind']=='user' or m['id']==actor['id'] or (actor['kind']=='bridge' and m['bridge']==actor['id'])]
+            members = [dict(m) for m in db.execute('SELECT id,name,kind,role,human_role,harness,bridge,enabled,paused,revoked,status,last_seen,native_id,detail,runtime,session_type,disabled_reason,steer_supported,sync_supported,created,deleted_at,lifecycle_supported,bubble_color,avatar,token_hash IS NOT NULL AS has_credential FROM members WHERE room=?',(room_id,))]
+            members=[m for m in members if m['session_type']!='manager' or guests.owner(actor,room_id) or m['id']==actor['id'] or (actor['kind']=='bridge' and m['bridge']==actor['id'])]
+            guest=actor['kind']=='user' and not guests.owner(actor,room_id)
+            if guest:members=[m for m in members if m['kind']!='bridge' and not m['revoked']]
             room['session_rounds']={k:v for k,v in json.loads(room['session_rounds']).items() if k in {m['id'] for m in members}}
             room['session_speaks']={k:v for k,v in json.loads(room['session_speaks']).items() if k in {m['id'] for m in members}}
             for m in members:
+                if m['kind']=='user':m['human_role']='owner' if m['id']==room['owner']+':'+room_id else m['human_role']
                 m['restorable']=bool(m['deleted_at'] and m.pop('has_credential') and any(b['id']==m['bridge'] and not b['revoked'] for b in members))
                 m.pop('has_credential',None)
                 m['runtime']=json.loads(m['runtime'])
@@ -733,18 +744,20 @@ class Store:
                     m['model_settings'] = dict(settings) if settings else {'model':'','revision':0,'applied_revision':0,'applied_model':'','supported':0}
                     m['model_settings']['catalog']=json.loads(m['model_settings'].get('catalog','[]'))
                     m['permission_settings']=permissions.snapshot(db,m)
-            return {'room':room,'members':members,'synchronous':synchronous.view(db,room_id,actor),**({'setup':self.setup_summary(db,room_id)} if actor['kind']=='user' else {})}
+                if guest:
+                    for field in ('native_id','bridge','permission_settings','model_settings','detail','restorable'):m.pop(field,None)
+            return {'room':room,'members':members,'viewer':{'role':actor.get('_room_role',''),'member_id':actor['id']+':'+room_id if actor['kind']=='user' else actor['id']},'synchronous':synchronous.view(db,room_id,actor),**({'setup':self.setup_summary(db,room_id)} if guests.owner(actor,room_id) else {})}
 
     def history(self, room_id, actor, after=0, before=None, limit=100, channel=None, through=None):
         with self.tx() as db:
-            self.access(db,room_id,actor)
+            self.access(db,room_id,actor,manage=False)
             synchronous.settle(db,room_id)
             steering.settle(db)
             visibility="(private_to='' OR private_to=?)";params=[actor['id'] if is_manager(actor) else '']
-            if actor['kind']=='user':visibility='1=1';params=[]
-            else:visibility+=' AND recalled_at=0'
+            if guests.owner(actor,room_id):visibility='1=1';params=[]
+            if actor['kind']!='user':visibility+=' AND recalled_at=0'
             if channel is not None:
-                if channel and not (actor['kind']=='user' or (is_manager(actor) and channel==actor['id'])):raise Problem('无权读取此管理会话',403)
+                if channel and not (guests.owner(actor,room_id) or (is_manager(actor) and channel==actor['id'])):raise Problem('无权读取此管理会话',403)
                 visibility+=' AND private_to=?';params.append(channel)
             if run:=synchronous.gate(db,actor):
                 visibility+=' AND (id<=? OR sender=? OR id IN (SELECT message FROM steers WHERE member=?))'

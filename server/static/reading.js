@@ -32,6 +32,7 @@ function readingAnchor() {
   return {el,block,y:el?.getBoundingClientRect().top,bottom:box.scrollHeight-box.scrollTop-box.clientHeight<80};
 }
 function summaryHTML(block) {
+  if(!roomOwner())return "";
   if(block.type!=='round')return '';
   const summary=state.timeline.summaries[block.round_key];
   if(summary?.status==='done')return `<div class="round-summary"><span>${esc(summary.manager_name||'manager')} 摘要 · 仅你可见</span><p>${esc((summary.body||'').replace(/^@\S+\s*/,''))}</p></div>`;
@@ -42,7 +43,7 @@ function summaryHTML(block) {
 function renderReading(forceBottom=false) {
   if(!state.timeline)return;
   const box=$('messages'),anchor=readingAnchor(),blocks=state.timeline.blocks;
-  if(!blocks.length){box.innerHTML='<div class="room-welcome"><div class="empty-mark">⌁</div><h3>等待你的第一个任务。</h3><p>公开讨论和 manager 私聊共用此消息流；标记为私有的消息只有你和对应 manager 可见。</p></div>';renderReadingRail();return;}
+  if(!blocks.length){box.innerHTML=`<div class="room-welcome"><div class="empty-mark">⌁</div><h3>${canSpeak()?'发起第一个话题':'等待公开讨论'}</h3></div>`;renderReadingRail();return;}
   box.querySelector('.room-welcome')?.remove();
   const keys=new Set(blocks.map(b=>b.key));
   for(const el of [...box.children])if(!keys.has(el.dataset.block))el.remove();
@@ -82,7 +83,7 @@ function renderReading(forceBottom=false) {
   $('reading-selection').textContent=state.readingSelection?'完成':'多选';
   document.querySelector('.reading-toolbar').classList.toggle('selecting',state.readingSelection);
   $('reading-selection').setAttribute('aria-pressed',String(state.readingSelection));$('messages').classList.toggle('selecting-rounds',state.readingSelection);
-  $('reading-selection-count').textContent=state.readingSelection?`已选 ${state.readingSelected.size} 段 · 拖拽框选 / Shift 连选`:`${state.timeline.rounds.length} 轮 · 私聊仅你可见`;
+  $('reading-selection-count').textContent=state.readingSelection?`已选 ${state.readingSelected.size} 段 · 拖拽框选 / Shift 连选`:`${state.timeline.rounds.length} 轮${roomOwner()?' · 私聊仅你可见':''}`;
   $('expand-selected').disabled=!state.readingSelected.size;$('collapse-selected').disabled=!state.readingSelected.size;
   renderReadingRail();
 }

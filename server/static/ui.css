@@ -291,7 +291,15 @@ dialog::backdrop{background:#2c292559;backdrop-filter:none}
 }
 
 /* Phone: keep the existing compact layout; only flatten and recolor it. */
+.guest-role-label{display:flex;align-items:center;gap:8px;margin:8px 0;font-size:12px;color:var(--ink-2)}
+.guest-role-label select{width:auto;min-width:0;height:30px;padding:3px 24px 3px 8px;font-size:12px}
+.guest-invite-actions{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-top:16px}
+.guest-invite-actions small{font-size:12px}
+.observer-notice{padding:12px 16px;text-align:center;font-size:12px;color:var(--ink-2);border-top:1px solid var(--line)}
+.guest-room .room-actions{display:flex}
+.danger{color:#b0503b}
 @media(max-width:800px){
+  .room-actions{grid-template-columns:repeat(5,minmax(0,1fr))}
   .reading-toolbar{background:var(--surface)}
   .message,.round-body .message{padding:6px 4px;gap:8px}
   .message.folded{padding-top:4px;padding-bottom:4px}

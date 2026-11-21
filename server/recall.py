@@ -29,7 +29,7 @@ def withdraw(store,actor,room_id,message_id):
     from . import synchronous,reading
     if actor['kind']!='user':raise Problem('只有发送消息的用户可以撤回',403)
     with store.tx() as db:
-        store.access(db,room_id,actor)
+        store.access(db,room_id,actor,manage=False)
         message=db.execute('SELECT * FROM messages WHERE room=? AND id=?',(room_id,message_id)).fetchone()
         if not message:raise Problem('消息不存在',404)
         if message['sender']!=actor['id']+':'+room_id or message['message_kind']!='chat':

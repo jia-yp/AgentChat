@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 
 from .core import Store, Problem, digest, password_hash, password_ok, token, valid_name, valid_model, valid_runtime, manages_member, LEASE_SECONDS
 from .limits import BodyLimit
-from . import permissions, synchronous, reading, session_changes
+from . import permissions, synchronous, reading, session_changes, guests
 
 
 class Login(BaseModel):
@@ -85,6 +85,22 @@ class PermissionInput(BaseModel):
 
 class AppearanceInput(BaseModel):
     bubble_color: str = Field(pattern=r'^(#[0-9a-fA-F]{6})?$',max_length=7)
+
+
+class GuestInvitationInput(BaseModel):
+    role: str = Field(pattern='^(observer|participant)$')
+    rotate: bool = False
+
+
+class GuestJoinInput(BaseModel):
+    token: str = Field(min_length=32,max_length=128)
+    name: str | None = Field(default=None,max_length=40)
+
+
+class GuestMemberInput(BaseModel):
+    name: str | None = Field(default=None,min_length=1,max_length=40)
+    role: str | None = Field(default=None,pattern='^(observer|participant)$')
+    kick: bool = False
 
 
 AVATAR_ICONS = {'codex','claude','antigravity','deepseek'}
@@ -414,7 +430,32 @@ def create_app(data_dir=None):
     def rooms(request:Request):
         a=user(request)
         with store.tx() as db:
-            return [dict(x) for x in db.execute('SELECT id,name,paused,created FROM rooms WHERE owner=? ORDER BY created DESC',(a['id'],))]
+            return [dict(x) for x in db.execute('''SELECT r.id,r.name,r.paused,r.created,
+                CASE WHEN r.owner=? THEN 'owner' ELSE m.human_role END AS role FROM rooms r
+                LEFT JOIN members m ON m.id=?||':'||r.id AND m.kind='user' AND m.revoked=0
+                WHERE r.owner=? OR m.human_role IN ('observer','participant') ORDER BY r.created DESC''',(a['id'],a['id'],a['id']))]
+
+    @app.get('/api/rooms/{room_id}/guest-invitation')
+    def guest_invitation(room_id:str,request:Request):
+        return guests.invitation(store,room_id,user(request))
+
+    @app.post('/api/rooms/{room_id}/guest-invitation')
+    def save_guest_invitation(room_id:str,data:GuestInvitationInput,request:Request):
+        return guests.invitation(store,room_id,user(request),**data.model_dump())
+
+    @app.post('/api/guest-invitations/preview')
+    def preview_guest_invitation(data:GuestJoinInput,request:Request):
+        a=user(request);throttle(request,'guest-invite',a['id'])
+        return guests.inspect_invitation(store,a,data.token)
+
+    @app.post('/api/guest-invitations/join')
+    def join_guest_invitation(data:GuestJoinInput,request:Request):
+        a=user(request);throttle(request,'guest-invite',a['id'])
+        return guests.inspect_invitation(store,a,data.token,join=True,name=data.name)
+
+    @app.patch('/api/rooms/{room_id}/guests/{member_id}')
+    def edit_guest(room_id:str,member_id:str,data:GuestMemberInput,request:Request):
+        return guests.edit_member(store,room_id,user(request),member_id,**data.model_dump())
 
     @app.post('/api/rooms')
     def create_room(data:RoomInput,request:Request):
@@ -566,9 +607,10 @@ def create_app(data_dir=None):
     def member_appearance(room_id:str,member_id:str,data:AppearanceInput,request:Request):
         a=user(request)
         with store.tx() as db:
-            store.access(db,room_id,a)
+            store.access(db,room_id,a,manage=False)
             member=store.member(db,member_id)
-            if member['room']!=room_id or member['kind']!='agent':raise Problem('session 不存在',404)
+            if member['room']!=room_id or member['kind'] not in ('agent','user'):raise Problem('成员不存在',404)
+            if not guests.can_edit_appearance(a,room_id,member):raise Problem('只能修改自己的群聊资料',403)
             color=data.bubble_color.lower()
             db.execute('UPDATE members SET bubble_color=? WHERE id=?',(color,member_id))
         return {'id':member_id,'bubble_color':color}
@@ -578,9 +620,10 @@ def create_app(data_dir=None):
         a=user(request)
         avatar=valid_avatar(data.avatar)
         with store.tx() as db:
-            store.access(db,room_id,a)
+            store.access(db,room_id,a,manage=False)
             member=store.member(db,member_id)
             if member['room']!=room_id or member['kind'] not in ('agent','user'):raise Problem('成员不存在',404)
+            if not guests.can_edit_appearance(a,room_id,member):raise Problem('只能修改自己的群聊资料',403)
             db.execute('UPDATE members SET avatar=? WHERE id=?',(avatar,member_id))
         return {'id':member_id,'avatar':avatar}
 

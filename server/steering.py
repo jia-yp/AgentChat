@@ -89,8 +89,9 @@ def receipts(db, message):
 
 
 def can_convert(actor, message):
+    from .guests import owner
     if message['message_kind']=='session_change_request':return False
-    return actor and (actor['kind']=='user' or (actor['kind']=='agent' and actor['id']==message['sender']))
+    return actor and (owner(actor,message['room']) or (actor['kind']=='user' and actor.get('_room_role')=='participant' and message['sender']==actor['id']+':'+message['room']) or (actor['kind']=='agent' and actor['id']==message['sender']))
 
 
 def offer(db, actor, message, delivery):
@@ -111,7 +112,7 @@ def offer(db, actor, message, delivery):
 def convert(store, actor, room_id, delivery_id, task_ref):
     from .core import Problem, visible_message
     with store.tx() as db:
-        room=store.access(db,room_id,actor)
+        room=store.access(db,room_id,actor,manage=False)
         settle(db)
         queued=db.execute('SELECT * FROM deliveries WHERE id=? AND room=?',(delivery_id,room_id)).fetchone()
         if not queued:raise Problem('排队任务不存在',404)

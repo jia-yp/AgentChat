@@ -56,7 +56,7 @@ def inventory(store,room,actor):
 
 def enqueue(db,r):
     manager=db.execute('SELECT name FROM members WHERE id=?',(r['manager'],)).fetchone()[0]
-    owner=db.execute("SELECT id FROM members WHERE room=? AND kind='user'",(r['room'],)).fetchone()[0]
+    owner=db.execute("SELECT id FROM members WHERE room=? AND id=(SELECT owner||':'||id FROM rooms WHERE id=members.room)",(r['room'],)).fetchone()[0]
     names=[x['name'] for x in json.loads(r['additions'])]
     removed=[x['name'] for x in json.loads(r['removals'])]
     body=f'@{manager} 请处理我在设置中提交的 session 变更：'+('新增 '+ '、'.join(names)+'；' if names else '')+('移除 '+'、'.join(removed)+'；' if removed else '')+'沿用当前项目，保留历史和文件。'
@@ -245,7 +245,7 @@ def report(store,actor,rid,error=''):
         for item in removals:
             if not db.execute('SELECT revoked FROM members WHERE id=?',(item['id'],)).fetchone()[0]:problem('移除操作尚未完成',409)
         db.execute("UPDATE session_changes SET status='complete',error='',updated=? WHERE id=?",(time.time(),rid))
-        owner=db.execute("SELECT id,name FROM members WHERE room=? AND kind='user'",(r['room'],)).fetchone()
+        owner=db.execute("SELECT id,name FROM members WHERE room=? AND id=(SELECT owner||':'||id FROM rooms WHERE id=members.room)",(r['room'],)).fetchone()
         body=f"@{owner['name']} session 变更已完成。"+('新增：'+ '、'.join('@'+x['name'] for x in roles)+'，等待你首次点名。' if roles else '')+('已移除：'+'、'.join('@'+x['name'] for x in removals)+'；历史、原生会话和本地文件保留。' if removals else '')
         db.execute("""INSERT INTO messages(room,sender,body,targets,nonce,created,private_to,max_rounds,message_kind)
             VALUES(?,?,?,?,?,?,?,0,'session_change_result')""",(r['room'],owner['id'],body,json.dumps([owner['name']]),'session-change-result:'+rid,time.time(),r['manager']))

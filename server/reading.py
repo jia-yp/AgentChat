@@ -28,10 +28,10 @@ def initialize(db):
     db.execute('INSERT OR IGNORE INTO reading_state VALUES(1,(SELECT COALESCE(MAX(id),0) FROM messages))')
 
 
-def owner(store, db, room, actor):
+def owner(store, db, room, actor, manage=False):
     from .core import Problem
     if actor['kind'] != 'user':raise Problem('阅读索引和搜索仅群聊管理员可用',403)
-    return store.access(db,room,actor)
+    return store.access(db,room,actor,manage=manage)
 
 
 def rounds(db, room):
@@ -91,7 +91,7 @@ def enqueue(store, db, group, room, explicit=False):
     if not manager:
         if explicit:raise Problem('需要已启用的 manager 和新版 bridge；请先 @ manager，并确认它未关闭',409)
         return
-    admin=db.execute("SELECT id,name FROM members WHERE room=? AND kind='user'",(room,)).fetchone()
+    admin=db.execute("SELECT id,name FROM members WHERE room=? AND id=(SELECT owner||':'||id FROM rooms WHERE id=members.room)",(room,)).fetchone()
     body=f"@{manager['name']} 请对任务 #{group['root']} 的第 {group['number']} 轮作简短阅读摘要，仅回复 @{admin['name']}。这是自动摘要，不是新的项目任务；不要执行工具、修改文件或分派工作。"
     request=db.execute('''INSERT INTO messages(room,sender,body,targets,nonce,created,private_to,max_rounds,message_kind,summary_root,summary_round)
         VALUES(?,?,?,?,?,?,?,0,'summary_request',?,?)''',(room,admin['id'],body,json.dumps([manager['name']]),'summary:'+secrets.token_hex(12),time.time(),manager['id'],group['root'],group['number'])).lastrowid
@@ -115,7 +115,7 @@ def finish(store, db, delivery, member, body, runtime):
     job=db.execute('SELECT * FROM round_summaries WHERE request=? AND delivery=?',(request['id'],delivery['id'])).fetchone()
     if not job:raise Problem('摘要已过期',409)
     # A summary has one final private result. It cannot route or spawn another task.
-    admin=db.execute("SELECT name FROM members WHERE room=? AND kind='user'",(delivery['room'],)).fetchone()[0]
+    admin=db.execute("SELECT name FROM members WHERE room=? AND id=(SELECT owner||':'||id FROM rooms WHERE id=members.room)",(delivery['room'],)).fetchone()[0]
     import re
     text=re.sub(r'^(?:\s*@[\w\-]+[\s,，:：;；]*)+','',body).strip()
     if not text:raise Problem('摘要为空')
@@ -128,20 +128,25 @@ def finish(store, db, delivery, member, body, runtime):
 
 def timeline(store, room, actor, revision=''):
     from . import synchronous
+    from .guests import owner as is_owner
     with store.tx() as db:
         owner(store,db,room,actor);synchronous.settle(db,room);settle(store,db,room)
+        creator=is_owner(actor,room)
+        visible='' if creator else " AND private_to=''"
         jobs=[dict(r) for r in db.execute('''SELECT j.*,s.name AS manager_name,m.body AS body FROM round_summaries j
             LEFT JOIN members s ON s.id=j.manager LEFT JOIN messages m ON m.id=j.result WHERE j.room=?''',(room,))]
+        if not creator:jobs=[]
         groups=rounds(db,room)
-        recalls=[dict(r) for r in db.execute('SELECT id,recalled_at FROM messages WHERE room=? AND recalled_at>0 ORDER BY id',(room,))]
-        stamp=[tuple(db.execute('SELECT COUNT(*),MAX(id) FROM messages WHERE room=?',(room,)).fetchone()),groups,jobs,recalls]
+        recalls=[dict(r) for r in db.execute('SELECT id,recalled_at FROM messages WHERE room=? AND recalled_at>0'+visible+' ORDER BY id',(room,))]
+        names=[tuple(r) for r in db.execute("SELECT id,name FROM members WHERE room=? AND kind='user'",(room,))]
+        stamp=[tuple(db.execute('SELECT COUNT(*),MAX(id) FROM messages WHERE room=?'+visible,(room,)).fetchone()),groups,jobs,recalls,names]
         current=hashlib.sha256(json.dumps(stamp,sort_keys=True).encode()).hexdigest()[:20]
         if revision==current:return {'unchanged':True,'revision':current}
         groupmap={g['key']:g for g in groups};summaries={f"{j['root']}:{j['number']}":j for j in jobs}
         rows=db.execute(f'''SELECT m.id,m.created,m.private_to,m.message_kind,m.summary_root,m.summary_round,m.recalled_at,
             {ROOT} AS root,{ROUND} AS number,m.round_mode,m.delivery_mode,s.name AS sender,s.kind,
             CASE WHEN m.recalled_at>0 THEN '消息已撤回' ELSE substr(m.body,1,220) END AS preview FROM messages m JOIN members s ON s.id=m.sender
-            WHERE m.room=? AND m.message_kind IN ('chat','recovery_request','recovery_followup','session_change_request','session_change_result') ORDER BY m.id''',(room,)).fetchall()
+            WHERE m.room=? {visible} AND m.message_kind IN ('chat','recovery_request','recovery_followup','session_change_request','session_change_result') ORDER BY m.id''',(room,)).fetchall()
         blocks=[];segment=0
         for r in rows:
             r=dict(r)
@@ -166,23 +171,26 @@ def timeline(store, room, actor, revision=''):
 
 
 def messages(store, room, actor, ids):
-    from .core import Problem
+    from .core import Problem, visible_message
     if not ids or len(ids)>200 or any(not isinstance(i,int) or i<1 for i in ids):raise Problem('每次读取 1–200 个消息 ID')
     with store.tx() as db:
         owner(store,db,room,actor)
         rows=db.execute('SELECT * FROM messages WHERE room=? AND message_kind!=\'summary_request\' AND id IN ('+','.join('?' for _ in ids)+') ORDER BY id',(room,*ids)).fetchall()
-        return [store.message_dict(db,r,actor) for r in rows]
+        return [store.message_dict(db,r,actor) for r in rows if visible_message(actor,r)]
 
 
 def search(store, room, actor, query, before=0, scope='all', sender='', limit=40):
     from .core import Problem
+    from .guests import owner as is_owner
     query=query.strip()
     if not query or len(query)>200:raise Problem('请输入 1–200 个字符')
     if scope not in ('all','public','private'):raise Problem('未知的搜索范围')
     with store.tx() as db:
         owner(store,db,room,actor)
+        if scope=='private' and not is_owner(actor,room):raise Problem('无权读取管理会话',403)
         where=["m.room=?","m.message_kind!='summary_request'","m.recalled_at=0","instr(lower(m.body),lower(?))>0"]
         args=[room,query]
+        if not is_owner(actor,room):where.append("m.private_to=''")
         if before:where.append('m.id<?');args.append(before)
         if scope!='all':where.append("m.private_to"+('=' if scope=='public' else '!=')+"''")
         if sender:where.append('s.id=?');args.append(sender)
@@ -200,7 +208,7 @@ def search(store, room, actor, query, before=0, scope='all', sender='', limit=40
 def request_summary(store, room, actor, root, number):
     from .core import Problem
     with store.tx() as db:
-        room_info=owner(store,db,room,actor)
+        room_info=owner(store,db,room,actor,manage=True)
         if room_info['paused']:raise Problem('群聊已暂停',409)
         group=next((g for g in rounds(db,room) if g['root']==root and g['number']==number),None)
         if not group or group['count']<=5 or not group['complete']:raise Problem('仅已结束且超过 5 条消息的轮次可生成摘要',409)
