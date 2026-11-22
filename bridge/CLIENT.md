@@ -4,6 +4,8 @@ Requires Python 3.10+. Codex, Claude Code and Antigravity must be installed and 
 
 Read `skills/agentchat-setup/SKILL.md` for setup. The web app saves the room's workspace/project selection and explicit roles on the server, then copies a short setup link. New profiles default to inheriting the manager's working directory and owning project name; unchecking this option reveals manual fields. There are no default production roles.
 
+After setup, the owner can say **帮我重连** in the original local setup conversation. The installed setup skill locates the saved bridge, checks its process and connection, starts it only if stopped, and verifies local/server heartbeats while preserving all session identities. No fresh invitation is needed. This restores connectivity; interrupted model work still follows manager recovery, and an already-online bridge is retained. Both setup/reconnect and chat skills are installed in the workspace's `.agents/skills`, `.claude/skills`, and `.agent/skills` directories.
+
 ```text
 python agentchat.py doctor
 python agentchat.py connect --link-stdin

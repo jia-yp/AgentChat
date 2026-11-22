@@ -31,11 +31,13 @@ def cli_python():
 
 
 def install_skills(workspace):
-    source=ROOT/'skills'/'agentchat-chat'/'SKILL.md'
-    for name in ('.agents','.claude','.agent'):
-        target=workspace/name/'skills'/'agentchat-chat'/'SKILL.md'
+    copies=[(ROOT/'skills'/skill/'SKILL.md',workspace/name/'skills'/skill/'SKILL.md')
+            for skill in ('agentchat-chat','agentchat-setup') for name in ('.agents','.claude','.agent')]
+    # Check all destinations first, so a user-owned skill cannot cause a partial update.
+    for source,target in copies:
         if target.exists() and 'AgentChat managed skill' not in target.read_text(encoding='utf-8'):
             raise RuntimeError(f'已有同名 skill，未覆盖：{target}')
+    for source,target in copies:
         target.parent.mkdir(parents=True,exist_ok=True)
         shutil.copyfile(source,target)
     ignore=workspace/'.gitignore'

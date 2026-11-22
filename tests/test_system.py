@@ -208,6 +208,7 @@ def test_downloadable_setup_contains_only_client_source(system):
         assert 'agentchat.py' in names and 'bridge/runner.py' in names
         assert 'bridge/roles.py' in names and 'bridge/names.py' in names
         assert 'bridge/manage.ps1' in names and 'bridge/model_catalog.py' in names
+        assert archive.read('skills/agentchat-setup/SKILL.md').decode('utf-8').replace('\r\n','\n')==c.get('/downloads/setup-skill.md').text.replace('\r\n','\n')
         assert not any('data/' in n or '.agentchat/' in n or n.endswith('.env') for n in names)
     assert 'agentchat-setup' in c.get('/downloads/setup-skill.md').text
 
