@@ -3,7 +3,10 @@ __pycache__/
 .pytest_cache/
 *.pyc
 .env
+.env.*
+!.env.example
 data/
+backups/
 .agentchat/
 .runtime/
 *.sqlite*
