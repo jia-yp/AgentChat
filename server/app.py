@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 
 from .core import Store, Problem, digest, password_hash, password_ok, token, valid_name, valid_model, valid_runtime, manages_member, LEASE_SECONDS
 from .limits import BodyLimit
-from . import permissions, synchronous, reading, session_changes, guests
+from . import permissions, synchronous, reading, session_changes, guests, workspaces, lifecycle, manager
 
 
 class Login(BaseModel):
@@ -53,6 +53,8 @@ class SessionInput(BaseModel):
     credential: str | None = Field(default=None,min_length=32,max_length=128)
     session_type: str = 'worker'
     change_id: str = Field(default='',max_length=80)
+    permission_source: str = Field(default='',pattern='^(|session|workspace)$')
+    permission_mode: str = Field(default='inherit',max_length=40)
 
 
 class SessionChangeInput(BaseModel):
@@ -61,6 +63,7 @@ class SessionChangeInput(BaseModel):
     removals: list[str] = Field(default_factory=list,max_length=100)
     expected: str = Field(max_length=80)
     nonce: str = Field(min_length=1,max_length=80)
+    removal_mode: str = Field(default='legacy',pattern='^(legacy|finish|immediate)$')
 
 
 class SessionChangeReport(BaseModel):
@@ -79,6 +82,7 @@ class ModelInput(BaseModel):
 
 
 class PermissionInput(BaseModel):
+    source: str = Field(default='session',pattern='^(session|workspace)$')
     mode: str = Field(min_length=1,max_length=40)
     revision: int = Field(ge=0)
 
@@ -219,6 +223,33 @@ class HeartbeatInput(BaseModel):
     session_changes_supported: bool = False
     workspace: str = Field(default='',max_length=2000)
     project_name: str = Field(default='',max_length=200)
+    workspace_supported: bool = False
+
+
+class WorkspaceInput(BaseModel):
+    modes: dict[str,str]
+    revision: int = Field(ge=0)
+    manager_sessions: bool = True
+
+
+class LifecycleInput(BaseModel):
+    action: str = Field(pattern='^(leave|rejoin|cancel-leave)$')
+    nonce: str = Field(min_length=1,max_length=120)
+    immediate: bool = False
+
+
+class LifecycleAck(BaseModel):
+    credential: str = Field(default='',max_length=128)
+
+
+class ManagerSessionsInput(BaseModel):
+    action: str = Field(pattern='^(create|leave|rejoin|cancel-leave)$')
+    cause: int = Field(ge=1)
+    nonce: str = Field(min_length=1,max_length=80)
+    roles: list[dict] = Field(default_factory=list,max_length=100)
+    members: list[str] = Field(default_factory=list,max_length=100)
+    immediate: bool = False
+    expected: str | None = Field(default=None,max_length=80)
 
 
 class FinishInput(BaseModel):
@@ -469,6 +500,30 @@ def create_app(data_dir=None):
     def session_inventory(room_id:str,request:Request):
         return session_changes.inventory(store,room_id,user(request))
 
+    @app.get('/api/rooms/{room_id}/workspaces')
+    def workspace_list(room_id:str,request:Request):
+        return workspaces.inventory(store,room_id,actor(request))
+
+    @app.post('/api/rooms/{room_id}/members/{member_id}/lifecycle')
+    def session_transition(room_id:str,member_id:str,data:LifecycleInput,request:Request):
+        return lifecycle.request(store,room_id,member_id,actor(request),**data.model_dump())
+
+    @app.post('/api/bridge/session-transitions/{operation}/ack')
+    def session_transition_ack(operation:int,data:LifecycleAck,request:Request):
+        return lifecycle.acknowledge(store,actor(request),operation,**data.model_dump())
+
+    @app.get('/api/manager/sessions')
+    def manager_sessions(request:Request):
+        return manager.inventory(store,actor(request))
+
+    @app.post('/api/manager/sessions')
+    def manager_sessions_action(data:ManagerSessionsInput,request:Request):
+        return manager.operate(store,actor(request),**data.model_dump())
+
+    @app.post('/api/rooms/{room_id}/workspaces/{bridge_id}')
+    def workspace_save(room_id:str,bridge_id:str,data:WorkspaceInput,request:Request):
+        return workspaces.save(store,room_id,actor(request),bridge_id,**data.model_dump())
+
     @app.post('/api/rooms/{room_id}/session-changes')
     def submit_session_change(room_id:str,data:SessionChangeInput,request:Request):
         return session_changes.submit(store,room_id,user(request),**data.model_dump())
@@ -683,6 +738,8 @@ def create_app(data_dir=None):
             db.execute("UPDATE members SET last_seen=?,status='online' WHERE id=?",(time.time(),a['id']))
             db.execute("INSERT INTO bridge_projects(bridge,supported,workspace,project) VALUES(?,?,?,?) ON CONFLICT(bridge) DO UPDATE SET supported=excluded.supported,workspace=COALESCE(NULLIF(excluded.workspace,''),bridge_projects.workspace),project=COALESCE(NULLIF(excluded.project,''),bridge_projects.project)",
                        (a['id'],int(data.session_changes_supported),data.workspace,data.project_name))
+            db.execute('UPDATE bridge_projects SET workspace_supported=? WHERE bridge=?',(int(data.workspace_supported),a['id']))
+            if data.workspace_supported:workspaces.ensure(db,a['id'])
             for item in data.sessions:
                 mid=str(item.get('id',''))
                 member=db.execute('SELECT id,harness,status FROM members WHERE id=? AND bridge=? AND revoked=0',(mid,a['id'])).fetchone()
@@ -737,8 +794,9 @@ def create_app(data_dir=None):
             synchronous.settle(db,a['room'])
             session_changes.settle(db,a['room'])
             changes=session_changes.pending(db,a['id'])
+            transitions=lifecycle.states(db,a['id'])
         return {'ok':True,'valid_leases':valid_leases,'invalid_leases':invalid_leases,'lease_seconds':LEASE_SECONDS,
-                'model_settings':configs,'permission_settings':permission_configs,'session_states':session_states,'session_changes':changes}
+                'model_settings':configs,'permission_settings':permission_configs,'session_states':session_states,'session_changes':changes,'session_transitions':transitions}
 
     @app.post('/api/bridge/sessions/{member_id}/claim')
     def claim(member_id:str,request:Request):

@@ -66,7 +66,7 @@ async function submitSessionChanges() {
   if(!additions.length&&!removals.length)throw new Error('请添加角色，或勾选要移除的 session');
   const names=new Set((state.snapshot?.members||[]).map(m=>m.name));
   if(additions.some(r=>names.has(r.name)))throw new Error('新增名称与已有 session 重复；已删除的 session 请在群聊管理中恢复');
-  const room=state.room,payload={manager:manager.id,additions,removals,expected:manager.revision};
+  const room=state.room,payload={manager:manager.id,additions,removals,expected:manager.revision,removal_mode:'finish'};
   const key=JSON.stringify(payload);
   if(state.changePending?.key!==key)state.changePending={key,nonce:crypto.randomUUID()};
   state.setupSaving=true;$('save-setup').disabled=true;

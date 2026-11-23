@@ -11,7 +11,7 @@ from pathlib import Path
 
 from bridge.names import NAME_PATTERN, normalize_name
 from bridge.roles import worker_roles
-from . import steering, permissions, synchronous, reading, recall, recovery, session_changes, guests
+from . import steering, permissions, synchronous, reading, recall, recovery, session_changes, guests, workspaces, lifecycle
 
 LEASE_SECONDS=90
 
@@ -144,6 +144,8 @@ class Store:
             db.executescript(SCHEMA)
             db.executescript(guests.SCHEMA)
             db.executescript(permissions.SCHEMA)
+            db.executescript(workspaces.SCHEMA)
+            db.executescript(lifecycle.SCHEMA)
             db.executescript(synchronous.SCHEMA)
             db.executescript(recovery.SCHEMA)
             db.executescript(session_changes.SCHEMA)
@@ -151,7 +153,7 @@ class Store:
             for table,columns in {
                 'rooms':{'max_rounds':'INTEGER NOT NULL DEFAULT 8','round_mode':"TEXT NOT NULL DEFAULT 'global'",'session_rounds':"TEXT NOT NULL DEFAULT '{}'",'session_speaks':"TEXT NOT NULL DEFAULT '{}'"},
                 'members':{'human_role':"TEXT NOT NULL DEFAULT ''",'runtime':"TEXT NOT NULL DEFAULT '{}'",'session_type':"TEXT NOT NULL DEFAULT 'worker'",'disabled_reason':"TEXT NOT NULL DEFAULT ''",'steer_supported':'INTEGER NOT NULL DEFAULT 0','sync_supported':'INTEGER NOT NULL DEFAULT 0',
-                           'deleted_at':'REAL NOT NULL DEFAULT 0','lifecycle_supported':'INTEGER NOT NULL DEFAULT 0','summary_supported':'INTEGER NOT NULL DEFAULT 0','bubble_color':"TEXT NOT NULL DEFAULT ''",'avatar':"TEXT NOT NULL DEFAULT ''",'claims_paused_until':'REAL NOT NULL DEFAULT 0'},
+                           'deleted_at':'REAL NOT NULL DEFAULT 0','lifecycle_supported':'INTEGER NOT NULL DEFAULT 0','summary_supported':'INTEGER NOT NULL DEFAULT 0','bubble_color':"TEXT NOT NULL DEFAULT ''",'avatar':"TEXT NOT NULL DEFAULT ''",'claims_paused_until':'REAL NOT NULL DEFAULT 0','departing':'INTEGER NOT NULL DEFAULT 0'},
                 'messages':{'max_rounds':'INTEGER NOT NULL DEFAULT 8','stopped':'INTEGER NOT NULL DEFAULT 0',
                             'runtime':"TEXT NOT NULL DEFAULT '{}'",'recipient_names':"TEXT NOT NULL DEFAULT ''",'private_to':"TEXT NOT NULL DEFAULT ''",
                             'round_mode':"TEXT NOT NULL DEFAULT 'global'",'session_rounds':"TEXT NOT NULL DEFAULT '{}'",
@@ -161,6 +163,9 @@ class Store:
                               'recovery_mode':"TEXT NOT NULL DEFAULT ''",'recovery_id':"TEXT NOT NULL DEFAULT ''"},
                 'agent_settings':{'catalog':"TEXT NOT NULL DEFAULT '[]'",'catalog_source':"TEXT NOT NULL DEFAULT ''",'catalog_updated':'REAL NOT NULL DEFAULT 0','catalog_refresh':'REAL NOT NULL DEFAULT 0','reasoning_effort':'TEXT','timeout_seconds':'INTEGER'},
                 'setup_profiles':{'inherit_manager':'INTEGER NOT NULL DEFAULT 0','project_name':"TEXT NOT NULL DEFAULT ''"},
+                'agent_permissions':{'source':"TEXT NOT NULL DEFAULT 'session'"},
+                'bridge_projects':{'workspace_supported':'INTEGER NOT NULL DEFAULT 0'},
+                'session_changes':{'source':"TEXT NOT NULL DEFAULT 'owner'",'removal_mode':"TEXT NOT NULL DEFAULT 'legacy'"},
                 'setup_requests':{'manager_required':'INTEGER NOT NULL DEFAULT 0','inherit_manager':'INTEGER NOT NULL DEFAULT 0',
                                   'project_name':"TEXT NOT NULL DEFAULT ''",'resolved_workspace':"TEXT NOT NULL DEFAULT ''",'resolved_project_name':"TEXT NOT NULL DEFAULT ''"},
             }.items():
@@ -462,7 +467,7 @@ class Store:
             self.post_in(db,row['room'],bridge,f"@{owner['name']} 本地 setup 已完成，{len(expected)} 个协作 session 已接入{manager_note}。未启用的 session 等待你的首次 @；本次接入链接已失效。",'setup-complete:'+request_id)
             return {'ok':True,'completed':now,'token_rotated':rotated}
 
-    def add_session(self, actor, name, role, harness, model='', model_control=False, credential=None, session_type='worker', change_id=''):
+    def add_session(self, actor, name, role, harness, model='', model_control=False, credential=None, session_type='worker', change_id='', permission_source='', permission_mode='inherit'):
         if actor['kind'] != 'bridge':
             raise Problem('需要 bridge token', 403)
         name = valid_name(name)
@@ -473,13 +478,16 @@ class Store:
             raise Problem('必须提供分工和 harness（分工最多 4000 字）')
         with self.tx() as db:
             desired=session_changes.registration(db,actor,change_id,name,role,harness,model) if change_id else None
+            if desired and desired.get('permission_source')=='workspace':permission_source='workspace'
             if change_id and session_type!='worker':raise Problem('只能注册批准的 worker',403)
             existing=db.execute('SELECT * FROM members WHERE room=? AND name=?',(actor['room'],name)).fetchone()
             if existing:
                 if existing['deleted_at']:raise Problem('此名称属于已删除的 session；请在群聊管理中恢复，或使用其他名称',409)
                 if credential and not existing['revoked'] and existing['bridge']==actor['id'] and existing['role']==role and existing['harness']==harness and existing['session_type']==session_type and hmac.compare_digest(existing['token_hash'] or '',digest(credential)):
                     if desired:session_changes.registered(db,change_id,existing['id'],desired)
-                    return {'id':existing['id'],'name':name,'token':credential}
+                    result={'id':existing['id'],'name':name,'token':credential}
+                    if permission_source:result['permission_settings']=workspaces.register_permissions(db,existing['id'],actor['id'],harness,permission_source,permission_mode)
+                    return result
                 raise Problem('session 名称已存在；请使用原配置恢复',409)
             mid, secret = secrets.token_hex(12), credential or token()
             if session_type=='manager' and db.execute("SELECT 1 FROM members WHERE bridge=? AND session_type='manager' AND revoked=0",(actor['id'],)).fetchone():raise Problem('此 bridge 已有 manager',409)
@@ -488,7 +496,9 @@ class Store:
             if model_control or model:
                 db.execute('INSERT INTO agent_settings(member,model,supported) VALUES(?,?,?)',(mid,model,int(model_control)))
             if desired:session_changes.registered(db,change_id,mid,desired)
-            return {'id': mid, 'name': name, 'token': secret}
+            result={'id': mid, 'name': name, 'token': secret}
+            if permission_source:result['permission_settings']=workspaces.register_permissions(db,mid,actor['id'],harness,permission_source,permission_mode)
+            return result
 
     def set_model(self, room_id, member_id, actor, model, revision, reasoning_effort=None, timeout_seconds=None):
         model = valid_model(model)
@@ -700,6 +710,8 @@ class Store:
             state = 'pending'
             if not member['enabled']:
                 state,reason='skipped','等待管理员首次 @'
+            elif member['departing']:
+                state,reason='skipped','session 正在退出托管，不再接收新任务'
             elif member['paused'] or room['paused']:
                 state,reason='skipped',('rate limit 已自动关闭' if member['disabled_reason']=='rate_limit' else 'session 已关闭') if member['paused'] else '群聊已暂停'
             elif mode=='individual' and limits.get(mid,limit) and self.used_rounds(db,root or message_id,mid)>=limits.get(mid,limit):
@@ -725,7 +737,7 @@ class Store:
             steering.settle(db)
             if actor['kind']=='user':reading.settle(self,db,room_id)
             session_changes.settle(db,room_id)
-            members = [dict(m) for m in db.execute('SELECT id,name,kind,role,human_role,harness,bridge,enabled,paused,revoked,status,last_seen,native_id,detail,runtime,session_type,disabled_reason,steer_supported,sync_supported,created,deleted_at,lifecycle_supported,bubble_color,avatar,token_hash IS NOT NULL AS has_credential FROM members WHERE room=?',(room_id,))]
+            members = [dict(m) for m in db.execute('SELECT id,name,kind,role,human_role,harness,bridge,enabled,paused,revoked,status,last_seen,native_id,detail,runtime,session_type,disabled_reason,steer_supported,sync_supported,created,deleted_at,lifecycle_supported,bubble_color,avatar,departing,token_hash IS NOT NULL AS has_credential FROM members WHERE room=?',(room_id,))]
             members=[m for m in members if m['session_type']!='manager' or guests.owner(actor,room_id) or m['id']==actor['id'] or (actor['kind']=='bridge' and m['bridge']==actor['id'])]
             guest=actor['kind']=='user' and not guests.owner(actor,room_id)
             if guest:members=[m for m in members if m['kind']!='bridge' and not m['revoked']]
@@ -738,6 +750,10 @@ class Store:
                 m['runtime']=json.loads(m['runtime'])
                 m['online'] = m['kind']=='user' or time.time()-m['last_seen']<45
                 if m['kind']=='agent':
+                    if guests.owner(actor,room_id) or (is_manager(actor) and m['bridge']==actor['bridge']):
+                        m['lifecycle']=lifecycle.view(lifecycle.current(db,m['id']))
+                        cap=db.execute('SELECT workspace_supported FROM bridge_projects WHERE bridge=?',(m['bridge'],)).fetchone()
+                        m['workspace_supported']=bool(cap and cap[0])
                     active=db.execute("SELECT d.id,d.attempts,d.message FROM deliveries d WHERE d.member=? AND d.status='running' AND d.lease_until>=?",(m['id'],time.time())).fetchone()
                     m['active_task']={'ref':active['id']+':'+str(active['attempts']),'message':active['message']} if active else None
                     settings = db.execute('SELECT model,revision,applied_revision,applied_model,supported,catalog,catalog_source,catalog_updated,reasoning_effort,timeout_seconds FROM agent_settings WHERE member=?',(m['id'],)).fetchone()
@@ -745,7 +761,7 @@ class Store:
                     m['model_settings']['catalog']=json.loads(m['model_settings'].get('catalog','[]'))
                     m['permission_settings']=permissions.snapshot(db,m)
                 if guest:
-                    for field in ('native_id','bridge','permission_settings','model_settings','detail','restorable'):m.pop(field,None)
+                    for field in ('native_id','bridge','permission_settings','model_settings','detail','restorable','lifecycle','workspace_supported'):m.pop(field,None)
             return {'room':room,'members':members,'viewer':{'role':actor.get('_room_role',''),'member_id':actor['id']+':'+room_id if actor['kind']=='user' else actor['id']},'synchronous':synchronous.view(db,room_id,actor),**({'setup':self.setup_summary(db,room_id)} if guests.owner(actor,room_id) else {})}
 
     def history(self, room_id, actor, after=0, before=None, limit=100, channel=None, through=None):
@@ -788,7 +804,7 @@ class Store:
                 return None
             if bridge['claims_paused_until']>time.time() and not db.execute("SELECT 1 FROM deliveries d JOIN members b ON b.id=d.member WHERE b.bridge=? AND d.status='running' LIMIT 1",(actor['id'],)).fetchone():
                 return None
-            if not m['enabled'] or m['paused'] or room['paused']:
+            if not m['enabled'] or m['paused'] or room['paused'] or m['departing']:
                 return None
             # Expiration is an uncertain result, for the manager to assess before
             # deciding whether to resume or replay work with possible side effects.

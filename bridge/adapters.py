@@ -89,14 +89,16 @@ def build_command(session,folder,workspace):
                 'env':{'AGENTCHAT_CONTEXT':session['context']}}}}
             cmd+=['--mcp-config',json.dumps(config)]
             allowed+=['mcp__agentchat__members','mcp__agentchat__history','mcp__agentchat__send']
+            if session.get('session_type')=='manager':allowed.append('mcp__agentchat__sessions')
         if allowed:cmd+=['--allowedTools',*allowed]
         if native:cmd+=['--resume',native]
+        elif session.get('attach_native_id'):cmd+=['--resume',session['attach_native_id'],'--fork-session']
         else:cmd+=['--session-id',session['requested_id'],'--name',session['name']]
         if role.get('model'):cmd+=['--model',role['model']]
         if role.get('reasoning_effort'):cmd+=['--effort',role['reasoning_effort']]
         return cmd+extras
     if harness=='antigravity':
-        cmd=[executable,'--input-format','stream-json','--output-format','stream-json']+antigravity_policy(role)
+        cmd=[executable,'--input-format','stream-json','--output-format','stream-json']+antigravity_policy(role,session)
         if native:cmd+=['--conversation',native]
         elif role.get('project') or session.get('project_id'):cmd+=['--project',role.get('project') or session['project_id']]
         else:cmd+=['--new-project']

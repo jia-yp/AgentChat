@@ -98,6 +98,9 @@ async function selectRoom(id,view='chat',writeRoute=true) {
   await refresh(); await listRooms();
 }
 function memberStatus(m) {
+  if(m.lifecycle?.state==='joining')return '等待重新加入';
+  if(m.departing)return '等待退出确认';
+  if(m.disabled_reason==='left')return '已退出托管';
   if(m.deleted_at)return '已删除';
   if(m.revoked) return '已撤销';
   if(m.paused) return m.disabled_reason==='rate_limit'?'已自动关闭 · rate limit':'已关闭';
@@ -177,34 +180,37 @@ function modelSync(member) {
 }
 function renderPermissions(card,member) {
   const s=member.permission_settings||{mode:'inherit',revision:0,supported:false,detail:'请更新并重启本地 bridge'},choices=s.options||[];
+  const available=choices.slice();
+  if(s.workspace_mode&&s.supported)available.unshift({id:'__workspace__',label:'跟随 workspace 默认权限',description:`当前默认：${choices.find(x=>x.id===s.workspace_mode)?.label||s.workspace_mode}。修改默认值会影响此 session 的后续任务。`});
   let draft=state.permissionDrafts.get(member.id);
-  if(!draft||(!draft.dirty&&!draft.saving)){draft={mode:s.mode,revision:s.revision,dirty:false,saving:false};state.permissionDrafts.set(member.id,draft);}
+  if(!draft||(!draft.dirty&&!draft.saving)){draft={mode:s.source==='workspace'?'__workspace__':s.mode,revision:s.revision,dirty:false,saving:false};state.permissionDrafts.set(member.id,draft);}
   let form=card.querySelector('[data-permission-form]');
   if(!form){
     form=document.createElement('form');form.dataset.permissionForm=member.id;form.className='permission-form';
     form.innerHTML=`<div class="permission-heading"><label for="permissions-${esc(member.id)}">执行权限</label><span class="permission-sync"></span></div><select id="permissions-${esc(member.id)}" class="permission-input" aria-describedby="permission-help-${esc(member.id)}"></select><p id="permission-help-${esc(member.id)}" class="permission-description"></p><p class="permission-applied"></p><div class="permission-actions"><button type="button" class="secondary permission-reload">载入已保存权限</button><button type="submit" class="primary permission-save">保存权限</button></div>`;
     card.appendChild(form);
   }
-  const field=form.querySelector('.permission-input'),html=(choices.length?choices:[{id:s.mode,label:'暂不支持网页调整'}]).map(x=>`<option value="${esc(x.id)}">${esc(x.label)}</option>`).join('');
+  const field=form.querySelector('.permission-input'),html=(available.length?available:[{id:s.mode,label:'暂不支持网页调整'}]).map(x=>`<option value="${esc(x.id)}">${esc(x.label)}</option>`).join('');
   if(field.innerHTML!==html)field.innerHTML=html;
   if(field.value!==draft.mode)field.value=draft.mode;
   field.disabled=!s.supported||draft.saving;
   const synced=s.applied_revision===s.revision;
   form.querySelector('.permission-sync').textContent=!s.supported?'未支持':draft.dirty?'未保存':synced?'已同步':!member.online?'等待 bridge 上线':member.status==='running'?'当前任务后同步':'等待本地同步';
-  form.querySelector('.permission-description').textContent=choices.find(x=>x.id===draft.mode)?.description||s.detail;
+  form.querySelector('.permission-description').textContent=available.find(x=>x.id===draft.mode)?.description||s.detail;
   form.querySelector('.permission-applied').textContent=s.supported?`本地权限：${s.detail||'等待同步'}。${synced?'下次任务按此执行。':'已保存的修改将在空闲时同步。'}`:s.detail;
   form.querySelector('.permission-save').disabled=!s.supported||!draft.dirty||draft.saving;
   form.querySelector('.permission-save').textContent=draft.saving?'保存中…':'保存权限';
   form.querySelector('.permission-reload').disabled=draft.saving;
 }
 function sessionFooter(m) {
-  return `<div class="session-card-footer"><details class="session-details"><summary>会话信息</summary><dl><dt>创建时间</dt><dd>${m.created?esc(new Date(m.created*1000).toLocaleString('zh-CN')):'—'}</dd><dt>最近连接</dt><dd class="session-last-seen">${m.last_seen?esc(new Date(m.last_seen*1000).toLocaleString('zh-CN')):'尚未连接'}</dd><dt>原生 session ID</dt><dd class="session-native">${esc(m.native_id||'等待首次任务创建')}</dd></dl></details><button type="button" class="text-button session-delete" data-session-action="delete">删除 session</button></div>`;
+  return `<div class="session-card-footer"><details class="session-details"><summary>会话信息</summary><dl><dt>创建时间</dt><dd>${m.created?esc(new Date(m.created*1000).toLocaleString('zh-CN')):'—'}</dd><dt>最近连接</dt><dd class="session-last-seen">${m.last_seen?esc(new Date(m.last_seen*1000).toLocaleString('zh-CN')):'尚未连接'}</dd><dt>原生 session ID</dt><dd class="session-native">${esc(m.native_id||'等待首次任务创建')}</dd></dl></details><button type="button" class="text-button session-delete" data-session-action="${m.workspace_supported?'leave':'delete'}">${m.workspace_supported?'退出托管':'删除 session'}</button></div>`;
 }
 function renderManagement() {
+  window.loadWorkspacePolicies?.().catch(e=>toast(e.message));
   const all=state.snapshot.members.filter(m=>m.kind==='agent'),filter=$('session-filter').value,query=$('session-search').value.trim().toLocaleLowerCase(),container=$('manage-agents');
   const agents=all.filter(m=>(filter==='all'||(filter==='deleted'?m.revoked:!m.revoked&&(filter==='current'||(filter==='online'?m.online:!m.online))))&&(!query||`${m.name} ${m.harness} ${m.role}`.toLocaleLowerCase().includes(query)));
   $('manage-room-name').textContent=state.snapshot.room.name;
-  $('manage-count').textContent=`${all.filter(m=>!m.revoked).length} 个当前 session · ${all.filter(m=>m.revoked).length} 个已删除`;
+  $('manage-count').textContent=`${all.filter(m=>!m.revoked).length} 个当前 session · ${all.filter(m=>m.revoked).length} 个历史 session`;
   $('manage-empty').hidden=all.length>0;$('manage-no-results').hidden=!all.length||!!agents.length;
   for(const card of container.children)if(!agents.some(m=>m.id===card.dataset.agent))card.remove();
   for(const m of agents) {
@@ -218,8 +224,11 @@ function renderManagement() {
         card.innerHTML=`<div class="model-card-head"><div class="avatar agent">${esc(m.name.slice(0,2).toUpperCase())}</div><div><h3>${esc(m.name)}</h3><span class="harness-name">${esc(m.harness)}${m.session_type==='manager'?' · 私有 manager':''}</span></div><span class="model-sync">${esc(memberStatus(m))}</span></div><p class="model-role">${esc(m.role)}</p><p class="archived-info"></p>${sessionFooter(m)}`;
         const button=card.querySelector('[data-session-action]');button.dataset.sessionAction='restore';button.className='secondary';button.textContent='恢复 session';container.appendChild(card);}
       paintAvatar(card.querySelector('.model-card-head .avatar'),m);
-      card.querySelector('[data-session-action]').disabled=!m.restorable||state.sessionActions.has(m.id);
-      card.querySelector('.archived-info').textContent=m.restorable?`删除于 ${formatTime(m.deleted_at)}。恢复后等待你再次 @；此前的任务不会重放。`:'原接入凭证已撤销，保留历史记录；需要重新接入新的 session。';
+      const rejoin=!!m.workspace_supported&&!!m.deleted_at&&state.snapshot.members.some(b=>b.id===m.bridge&&!b.revoked),joining=m.lifecycle?.state==='joining',button=card.querySelector('[data-session-action]');
+      button.dataset.sessionAction=rejoin?'rejoin':'restore';button.textContent=joining?'等待本地接入':rejoin?'重新加入':'恢复 session';
+      button.disabled=joining||(!rejoin&&!m.restorable)||state.sessionActions.has(m.id);
+      card.querySelector('.model-sync').textContent=memberStatus(m);
+      card.querySelector('.archived-info').textContent=joining?'本地在线后恢复原生会话；此前的任务不会重放。':rejoin||m.restorable?'历史、文件和原生会话保留；重新加入后等待首次点名。':'原接入凭证已撤销，保留历史记录；需要重新接入新的 session。';
       continue;
     }
     if(!card) {
@@ -252,7 +261,10 @@ function renderManagement() {
     if(!card.querySelector('.session-card-footer'))card.insertAdjacentHTML('beforeend',sessionFooter(m));
     card.querySelector('.session-last-seen').textContent=m.last_seen?new Date(m.last_seen*1000).toLocaleString('zh-CN'):'尚未连接';
     card.querySelector('.session-native').textContent=m.native_id||'等待首次任务创建';
-    card.querySelector('[data-session-action]').disabled=state.sessionActions.has(m.id);
+    const lifecycleButton=card.querySelector('[data-session-action]');
+    lifecycleButton.disabled=state.sessionActions.has(m.id);
+    lifecycleButton.dataset.sessionAction=m.workspace_supported?'leave':'delete';
+    lifecycleButton.textContent=m.departing?'退出中 · 操作':m.workspace_supported?'退出托管':'删除 session';
   }
 }
 $('session-search').addEventListener('input',renderManagement);
@@ -261,6 +273,7 @@ async function manageSession(id,action) {
   if(state.sessionActions.has(id))return;
   const room=state.room,member=state.snapshot.members.find(m=>m.id===id);
   if(!member)return;
+  if(['leave','rejoin','cancel-leave'].includes(action))return transitionSession(member,action);
   const deleting=action==='delete',label=deleting?'删除':'恢复';
   if(deleting&&member.session_type!=='manager'&&await openSessionRemoval(member))return;
   const choice=await choose(`${label} ${member.name}？`,deleting?'停止此 session 的运行和排队任务，并移入「已删除」列表。历史消息和本地文件保留，以后可以恢复。':'保留原生会话和模型设置，恢复后等待你再次 @。此前取消的任务不会重新执行。',[{id:action,label:label+' session'},{id:'cancel',label:'取消'}]);
@@ -551,7 +564,7 @@ $('manage-agents').addEventListener('submit',safely(async e=>{
   if(permissionForm){
     const id=permissionForm.dataset.permissionForm,room=state.room,draft=state.permissionDrafts.get(id);
     if(draft.saving)return;draft.saving=true;renderManagement();
-    try {const saved=await post(`/rooms/${room}/members/${id}/permissions`,{mode:draft.mode,revision:draft.revision});Object.assign(draft,saved,{dirty:false});toast('权限已保存；本地同步后从下一项任务生效');}
+    try {const saved=await post(`/rooms/${room}/members/${id}/permissions`,{mode:draft.mode==='__workspace__'?'inherit':draft.mode,source:draft.mode==='__workspace__'?'workspace':'session',revision:draft.revision});Object.assign(draft,saved,{dirty:false});toast('权限已保存；本地同步后从下一项任务生效');}
     finally {draft.saving=false;if(state.room===room){await refresh();if(state.view==='manage')renderManagement();}}
     return;
   }

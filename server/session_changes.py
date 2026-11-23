@@ -3,6 +3,7 @@ import hashlib
 import json
 import secrets
 import time
+from contextlib import nullcontext
 
 from bridge.roles import worker_roles
 from bridge.model_settings import configured_model
@@ -64,23 +65,24 @@ def enqueue(db,r):
         VALUES(?,?,?,?,?,?,?,0,'session_change_request')""",(r['room'],owner,body,json.dumps([manager]),secrets.token_hex(12),time.time(),r['manager'])).lastrowid
     did=secrets.token_hex(12)
     db.execute('INSERT INTO deliveries(id,room,member,message,created) VALUES(?,?,?,?,?)',(did,r['room'],r['manager'],request,time.time()))
-    db.execute("UPDATE session_changes SET request=?,delivery=?,status='pending',error='',updated=? WHERE id=?",(request,did,time.time(),r['id']))
+    db.execute("UPDATE session_changes SET request=?,delivery=?,source='owner',status='pending',error='',updated=? WHERE id=?",(request,did,time.time(),r['id']))
     # Submitting a task explicitly addressed to this manager is an owner activation.
     db.execute("UPDATE members SET enabled=1 WHERE id=?",(r['manager'],))
 
 
-def submit(store,room,actor,manager,additions,removals,expected,nonce):
+def submit(store,room,actor,manager,additions,removals,expected,nonce,removal_mode='legacy',_db=None,_source=None):
     if actor['kind']!='user':problem('只有群聊管理员可提交增减清单',403)
     try:roles=worker_roles(additions) if additions else []
     except ValueError as exc:problem(str(exc))
     if any(r.get('session_type')=='manager' for r in additions):problem('不能通过角色列表新增 manager')
     if not roles and not removals:problem('还没有新增或移除的 session')
     if len(removals)!=len(set(removals)):problem('移除清单重复')
-    with store.tx() as db:
+    if removal_mode not in ('legacy','finish','immediate'):problem('无效的退出方式')
+    with (nullcontext(_db) if _db is not None else store.tx()) as db:
         room_info=store.access(db,room,actor);settle(db,room)
         old=db.execute('SELECT * FROM session_changes WHERE room=? AND nonce=?',(room,nonce)).fetchone()
         if old:
-            if old['manager']!=manager or json.loads(old['additions'])!=roles or [x['id'] for x in json.loads(old['removals'])]!=removals:problem('此提交编号已用于其他变更',409)
+            if old['manager']!=manager or old['removal_mode']!=removal_mode or json.loads(old['additions'])!=roles or [x['id'] for x in json.loads(old['removals'])]!=removals:problem('此提交编号已用于其他变更',409)
             return view(db,old)
         m=db.execute("SELECT * FROM members WHERE id=? AND room=? AND session_type='manager' AND revoked=0",(manager,room)).fetchone()
         if not m:problem('请选择本群已接入的 manager')
@@ -102,7 +104,10 @@ def submit(store,room,actor,manager,additions,removals,expected,nonce):
         rid=secrets.token_hex(12);now=time.time()
         db.execute('INSERT INTO session_changes(id,room,bridge,manager,nonce,additions,removals,created,updated) VALUES(?,?,?,?,?,?,?,?,?)',
                    (rid,room,m['bridge'],manager,nonce,json.dumps(roles,ensure_ascii=False),json.dumps(removed,ensure_ascii=False),now,now))
-        enqueue(db,db.execute('SELECT * FROM session_changes WHERE id=?',(rid,)).fetchone())
+        db.execute('UPDATE session_changes SET removal_mode=? WHERE id=?',(removal_mode,rid))
+        if _source:
+            db.execute("UPDATE session_changes SET status='applying',source='manager',request=?,delivery=? WHERE id=?",(_source['message'],_source['id'],rid))
+        else:enqueue(db,db.execute('SELECT * FROM session_changes WHERE id=?',(rid,)).fetchone())
         return view(db,db.execute('SELECT * FROM session_changes WHERE id=?',(rid,)).fetchone())
 
 
@@ -142,7 +147,7 @@ def payload(db,message):
 
 
 def finish(db,delivery,body):
-    r=db.execute('SELECT * FROM session_changes WHERE delivery=?',(delivery['id'],)).fetchone()
+    r=db.execute("SELECT * FROM session_changes WHERE delivery=? AND source!='manager'",(delivery['id'],)).fetchone()
     if not r:return False
     if r['status'] in ('applying','complete','cancelled','failed'):return True
     try:decision=json.JSONDecoder().raw_decode(body[body.index('{'):])[0]
@@ -175,6 +180,9 @@ def control(store,room,actor,rid,action):
             if r['status']=='complete':problem('变更已完成，不能撤销已完成的操作',409)
             db.execute("UPDATE session_changes SET status='cancelled',error='用户取消；已完成的部分保留',updated=? WHERE id=?",(time.time(),rid))
             db.execute("UPDATE deliveries SET status='cancelled',error='用户取消 session 变更' WHERE id=? AND status IN ('pending','running')",(r['delivery'],))
+            from . import lifecycle
+            for op in db.execute("SELECT member FROM session_transitions WHERE nonce=? AND status='pending' AND action='leave'",('change:'+rid,)).fetchall():
+                lifecycle.request_in(store,db,room,op['member'],'cancel-leave','cancel-change:'+rid)
         elif action=='retry':
             if r['status']!='failed':problem('只能重试失败的变更',409)
             if db.execute("SELECT 1 FROM session_changes WHERE bridge=? AND status IN ('pending','running','applying')",(r['bridge'],)).fetchone():problem('已有其他变更正在进行',409)
@@ -225,6 +233,11 @@ def remove(store,actor,rid,mid):
         if r['status']!='applying':problem('这项 session 变更不在执行中',409)
         if not available(db,r['bridge']):problem('bridge 或群聊已暂停',409)
         if mid not in {x['id'] for x in json.loads(r['removals'])}:problem('此 session 不在用户批准的移除清单中',403)
+        if r['removal_mode']!='legacy':
+            from . import lifecycle
+            operation=lifecycle.request_in(store,db,r['room'],mid,'leave','change:'+rid,r['removal_mode']=='immediate')
+            if operation['status']=='cancelled':problem('此 session 的退出已取消；请取消这份变更后重新提交',409)
+            return {'ok':operation['status']=='complete','operation':operation}
         owner=db.execute('SELECT owner FROM rooms WHERE id=?',(r['room'],)).fetchone()[0]
         store.session_lifecycle(r['room'],mid,{'kind':'user','id':owner},'delete',_db=db)
         return {'ok':True}

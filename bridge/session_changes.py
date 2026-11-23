@@ -27,15 +27,20 @@ class SessionChanges:
             if change['additions']:
                 from .cli import validate_roles
                 validate_roles(change['additions'])
+            waiting=False
             for member in change['removals']:
                 if bridge.stop.is_set():return
-                client.call(base+'/remove',{'member':member['id']})
+                removal=client.call(base+'/remove',{'member':member['id']})
+                if removal.get('operation'):
+                    waiting=waiting or not removal['ok']
+                    continue
                 with bridge.lock:
                     session=bridge.sessions.get(member['id'])
                     if session is not None:
                         session['revoked']=True
                         if job:=bridge.running.get(member['id']):cancel_job(job,'session_deleted','执行已停止：管理员通过 manager 移除了此 session')
                         else:write_json(session['context'],session)
+            if waiting:return
             if change['additions']:
                 from .cli import setup
                 args=SimpleNamespace(workspace=config['workspace'],server=config['url'],name=config['name'],

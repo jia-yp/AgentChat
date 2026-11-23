@@ -2,6 +2,18 @@
 
 NAS 上的多人 agent 群聊，本地 bridge 负责共享 workspace 和各 harness 的独立 session。网页支持电脑和手机；agent 不需要在工作电脑开放入站端口。
 
+## Workspace 权限与 session 生命周期
+
+群聊管理中的「Workspace 默认权限」按本群的本地 workspace 分开保存；当前一个 bridge 对应一个 workspace。同路径的其他机器或其他群不会合并权限。新接入的 Codex 默认使用工作区联网沙箱，Claude 自动接受编辑并允许专用群聊 MCP，Antigravity 使用后台协作沙箱（接受编辑、运行沙箱命令、访问群聊服务）。DeepSeek 和自定义命令仍由原生配置管理。已有 session 保持原权限；选择「跟随 workspace 默认权限」后，默认值的后续修改才会应用于它的下一项任务。创建者可以为信任的 workspace 选择完全访问；manager 无权改默认权限或通过新建角色覆盖它。
+
+管理员直接私聊 manager 即可要求创建角色、让某个 worker 退出或重新加入。管理工具只能作用于该 manager 的 workspace，而且必须关联正在执行的管理员私有任务；公共对话、摘要和异常恢复不能授权增减成员。可在 workspace 设置中关闭此能力。新增角色使用现有 gateway 与项目，无需新接入链接，仍等管理员首次点名。
+
+「退出托管」与开关暂停分开：默认停止新任务与排队任务，等当前任务结束及本地释放执行占用后再注销；也可以立即退出或取消等待中的退出。断线期间显示等待确认，重新连线先处理退出，不回放旧任务。历史、文件和原生会话保留；重新加入轮换群聊凭证，保留原生 ID，等待首次点名。旧版 gateway 需升级后使用这些操作。退出不会自动转入 Desktop；后续计划见 [TODO.md](TODO.md)。
+
+manager 的 `sessions` 工具支持 `list/create/leave/rejoin/cancel-leave`；CLI 和 PowerShell 使用同名 action。变更需要稳定 nonce，网络重试沿用原编号。对外部已有 Codex/Claude 会话，可在新增角色中提供 `attach_native_id`；本地验证准确 ID 与 workspace，在首次启用时分叉历史，保留来源会话。其他 harness 的外部历史接续尚不支持；已有 AgentChat 历史会话均使用 rejoin。Desktop 导出另行实现。
+
+没有可调用的群聊 MCP 或本机脚本受限时，session 可直接用文件编辑工具向本次任务的 `chat-tools/.../requests` 写 JSON。gateway 使用该 session 自己的身份执行 members/history/send，以及 manager 的 sessions，并在 receipts 写回结果；新任务不重放旧请求，网络重试沿用原 nonce。普通通信无需关闭沙箱或修改 PowerShell 脚本策略。此通道已通过 Windows Antigravity 后台协作模式的真实文件写入、主动群聊发送与最终回复验收。
+
 手机端使用紧凑布局：顶部操作保持一行，点入消息或输入框时自动收起顶部，阅读栏左侧箭头可重新展开。输入区随内容增高，并适配软键盘占用的可视区域；模式说明和同步发言次数设置放在「···」中，轮数、停止和发送保持可见。
 
 ## 部署位置（示例）
@@ -223,7 +235,7 @@ Codex / Claude 的项目以共享 cwd 关联；同 harness 的 manager 和 worke
 | Antigravity | 保留接入时权限、沙箱、完全访问 |
 | DeepSeek / 自定义 command / 自定义 args | 显示需在本机配置，不宣称已应用不支持的权限 |
 
-默认 `permissions: "inherit"` 保留原接入配置。已有 session 不会自动提权。Codex 使用 `network` 时仍受文件沙箱限制，可能无法访问 SSH 密钥；选择 `full` 才关闭原生沙箱。Claude 的 `ssh` 只增加 Bash/PowerShell 的 SSH/SCP/SFTP 命令规则，并为这些命令设置原生沙箱排除项；`full` 请求跳过工具审批并关闭原生沙箱。Antigravity 的 `full` 关闭沙箱并自动批准工具。更高优先级的本机/组织规则及操作系统权限仍然适用。SSH 使用本机既有账号、密钥和主机信任配置，网页不保存 SSH 凭证。[Claude 权限规则](https://code.claude.com/docs/en/permissions)、[原生沙箱规则](https://code.claude.com/docs/en/sandboxing)。
+未显式指定权限的新 session 跟随 workspace 默认权限；显式 `permissions: "inherit"` 保留原接入配置。已有 session 不会自动提权。Codex 使用 `network` 时仍受文件沙箱限制，可能无法访问 SSH 密钥；选择 `full` 才关闭原生沙箱。Claude 的 `ssh` 只增加 Bash/PowerShell 的 SSH/SCP/SFTP 命令规则，并为这些命令设置原生沙箱排除项；`full` 请求跳过工具审批并关闭原生沙箱。Antigravity 的 `collaborate` 保留沙箱和本机 deny/ask 规则，`full` 关闭沙箱并自动批准工具。更高优先级的本机/组织规则及操作系统权限仍然适用。SSH 使用本机既有账号、密钥和主机信任配置，网页不保存 SSH 凭证。[Claude 权限规则](https://code.claude.com/docs/en/permissions)、[原生沙箱规则](https://code.claude.com/docs/en/sandboxing)。
 
 权限 API 仅允许人类群管理员保存；worker、manager、bridge token 均不能修改。群消息、Steer 或模型的工具请求不会自动提权。权限通过本次进程的原生参数传入，不修改本机全局配置。角色 JSON 可选 `permissions` 字段，对应值见 `bridge/CLIENT.md`。
 

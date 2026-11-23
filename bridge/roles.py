@@ -26,6 +26,10 @@ def role_definitions(roles):
             raise ValueError(name + ' 需填写 1–4000 字的分工')
         if item.get('session_type','worker') not in ('worker','manager'):
             raise ValueError(name + ' 的 session_type 必须是 worker 或 manager')
+        if item.get('permission_source','session') not in ('session','workspace'):
+            raise ValueError(name+' 的 permission_source 必须是 session 或 workspace')
+        if item.get('permission_source')=='workspace' and item.get('args'):
+            raise ValueError(name+' 使用自定义 args，不能同时跟随 workspace 权限')
         validate_permissions(item)
         timeout_seconds(item)
         prompt_limit(item)

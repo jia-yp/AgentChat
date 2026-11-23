@@ -21,7 +21,7 @@ def queue(db,source):
     member=db.execute('SELECT * FROM members WHERE id=?',(d['member'],)).fetchone()
     room=db.execute('SELECT * FROM rooms WHERE id=?',(d['room'],)).fetchone()
     message=db.execute('SELECT * FROM messages WHERE id=?',(d['message'],)).fetchone()
-    if member['session_type']=='manager' or member['revoked'] or room['paused'] or message['recalled_at']:return
+    if member['session_type']=='manager' or member['revoked'] or member['departing'] or room['paused'] or message['recalled_at']:return
     if member['paused'] and member['disabled_reason']!='rate_limit':return
     if db.execute('SELECT stopped FROM messages WHERE id=?',(message['root'] or message['id'],)).fetchone()[0]:return
     manager=db.execute("""SELECT m.* FROM members m JOIN members b ON b.id=m.bridge
@@ -98,8 +98,8 @@ def followup(db,r,source):
     """A visible system continuation carries public task data, never private manager reasoning."""
     from . import synchronous
     m=db.execute('SELECT * FROM messages WHERE id=?',(source['message'],)).fetchone()
-    target=db.execute('SELECT name,paused,revoked FROM members WHERE id=?',(r['member'],)).fetchone()
-    if target['paused'] or target['revoked']:return None,'该 session 当前关闭，未自动重新启用'
+    target=db.execute('SELECT name,paused,revoked,departing FROM members WHERE id=?',(r['member'],)).fetchone()
+    if target['paused'] or target['revoked'] or target['departing']:return None,'该 session 当前关闭或正在退出，未自动重新启用'
     root=m['root'] or m['id'];number=0;status='pending';depth=m['depth']+1
     if source['sync_root']:
         run=synchronous.active(db,r['room'])
@@ -145,11 +145,11 @@ def finish(store,db,delivery,manager,body,runtime=None):
     if source['status']!='failed' or source['attempts']!=r['attempt']:
         applied='任务状态已变化，保留当前执行结果';action='next'
     elif action in ('retry','continue'):
-        member=db.execute('SELECT paused,revoked FROM members WHERE id=?',(r['member'],)).fetchone()
+        member=db.execute('SELECT paused,revoked,departing FROM members WHERE id=?',(r['member'],)).fetchone()
         run=synchronous.active(db,r['room']) if source['sync_root'] else None
         p=db.execute('SELECT * FROM sync_participants WHERE delivery=?',(source['id'],)).fetchone()
         same_round=not source['sync_root'] or bool(run and run['root']==source['sync_root'] and run['round']==source['sync_round'] and p and p['used']<p['quota'])
-        if member['paused'] or member['revoked']:applied='该 session 当前关闭，未自动重新启用'
+        if member['paused'] or member['revoked'] or member['departing']:applied='该 session 当前关闭或正在退出，未自动重新启用'
         elif same_round:
             if source['sync_root']:
                 db.execute("UPDATE sync_participants SET status='pending',error='' WHERE delivery=?",(source['id'],))

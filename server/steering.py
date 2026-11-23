@@ -53,7 +53,7 @@ def validate(db, room, actor, targets, body, task):
         raise Problem('Steer 需要单独指定一个正在工作的 agent')
     if len(body)>4000:raise Problem('Steer 补充信息最多 4000 字')
     target=targets[0]
-    if room['paused'] or target['paused'] or not target['enabled'] or target['revoked']:
+    if room['paused'] or target['paused'] or not target['enabled'] or target['revoked'] or target.get('departing'):
         raise Problem('目标 session 尚未启用、已关闭或群聊已暂停；Steer 不会激活它',409)
     if not target['steer_supported'] or time.time()-target['last_seen']>45:
         raise Problem('目标 harness 不支持运行中 Steer，或 bridge 已离线',409)

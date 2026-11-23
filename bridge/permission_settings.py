@@ -1,4 +1,7 @@
-"""Explicit, per-session native permissions; never inferred from model output."""
+"""Explicit native permissions; workspace defaults are resolved by the server."""
+import json
+from pathlib import Path
+from urllib.parse import urlsplit
 
 INHERIT = {'id':'inherit','label':'保留接入时权限','description':'沿用接入配置；不会自动扩大权限。'}
 FULL = {'id':'full','label':'完全访问（含 SSH）','description':'允许命令、联网和工作区外文件访问，使用本机账号的权限与 SSH 配置。'}
@@ -11,6 +14,7 @@ CATALOG = {
         {'id':'edits','label':'自动接受文件编辑','description':'自动接受文件编辑；需要额外授权的命令会被拒绝。'},
         {'id':'ssh','label':'文件编辑 + SSH / SCP / SFTP','description':'额外允许 SSH、SCP、SFTP 命令，包括其远程操作；其他工具仍遵循本机 Claude 权限规则。'}, FULL],
     'antigravity': [INHERIT,
+        {'id':'collaborate','label':'后台协作 · 工作区沙箱','description':'自动接受编辑与沙箱内命令，允许访问群聊服务；其他联网或越界操作仍遵循本机规则。'},
         {'id':'sandbox','label':'沙箱 · 自动接受编辑','description':'开启原生沙箱与终端限制；需额外授权的命令仍可能被拒绝。'}, FULL],
 }
 
@@ -73,7 +77,22 @@ def claude_settings(role):
     return {}
 
 
-def antigravity_policy(role):
+def antigravity_policy(role,session=None):
     mode=validate(role)
     if mode=='full':return ['--mode','accept-edits','--dangerously-skip-permissions','--sandbox=false']
+    if mode=='collaborate':
+        settings_path=Path.home()/'.gemini/antigravity-cli/settings.json'
+        configured=json.loads(settings_path.read_text(encoding='utf-8-sig')).get('permissions',{}) if settings_path.exists() else {}
+        if not isinstance(configured,dict):raise ValueError('Antigravity 本机 permissions 配置无效')
+        allow=list(configured.get('allow',[]))
+        if not all(isinstance(x,str) for x in allow):raise ValueError('Antigravity 本机 allow 配置无效')
+        root=Path(__file__).resolve().parents[1]
+        allow.extend(['read_file('+str(root/'bridge')+')','read_file('+str(root/'agentchat.py')+')'])
+        if session:
+            if host:=urlsplit(session.get('url','')).hostname:allow.append('read_url('+host+')')
+            if session.get('workspace'):allow.append('write_file('+session['workspace']+')')
+        allow.extend('mcp(agentchat/'+tool+')' for tool in ('members','history','send'))
+        if session and session.get('session_type')=='manager':allow.append('mcp(agentchat/sessions)')
+        settings={'toolPermission':'proceed-in-sandbox','artifactReviewPolicy':'always-proceed','permissions':{**configured,'allow':list(dict.fromkeys(allow))}}
+        return ['--mode','accept-edits','--sandbox','--settings',json.dumps(settings)]
     return ['--mode','accept-edits' if mode=='sandbox' else role.get('permission_mode','accept-edits'),'--sandbox']

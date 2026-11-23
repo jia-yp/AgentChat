@@ -80,10 +80,10 @@ def prepare(db,room,actor,parent,mode,maximum,allowances,private_to,delivery_mod
 
 def enroll(db,run,number):
     """Coalesce mentions into a single native invocation per recipient."""
-    rows=db.execute("SELECT d.*,m.paused,m.revoked,m.enabled,m.sync_supported,b.paused AS bridge_paused FROM deliveries d JOIN members m ON m.id=d.member LEFT JOIN members b ON b.id=m.bridge WHERE d.sync_root=? AND d.sync_round=? AND d.status='round_waiting' ORDER BY d.created,d.id",(run['root'],number)).fetchall()
+    rows=db.execute("SELECT d.*,m.paused,m.revoked,m.enabled,m.sync_supported,m.departing,b.paused AS bridge_paused FROM deliveries d JOIN members m ON m.id=d.member LEFT JOIN members b ON b.id=m.bridge WHERE d.sync_root=? AND d.sync_round=? AND d.status='round_waiting' ORDER BY d.created,d.id",(run['root'],number)).fetchall()
     groups={}
     for row in rows:
-        if row['paused'] or row['revoked'] or not row['enabled'] or row['bridge_paused']:
+        if row['paused'] or row['revoked'] or row['departing'] or not row['enabled'] or row['bridge_paused']:
             db.execute("UPDATE deliveries SET status='skipped',error='session 或 bridge 已关闭；未加入下一轮' WHERE id=?",(row['id'],));continue
         groups.setdefault(row['member'],[]).append(row)
     allowances=json.loads(run['allowances'])

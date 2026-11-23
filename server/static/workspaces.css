@@ -1,0 +1,11 @@
+.workspace-policies{border-block:1px solid var(--line);padding:10px 0;margin:10px 0 16px;font-size:13px}
+.workspace-policies>summary{cursor:pointer;font-weight:600;padding:4px 0}
+.workspace-policy-picker{display:flex;align-items:center;gap:8px;margin-top:12px}
+.workspace-policy-picker select{flex:1;min-width:0}
+#workspace-policy-path{overflow-wrap:anywhere;margin:8px 0}
+#workspace-policy-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}
+#workspace-policy-fields label{display:grid;gap:5px;text-transform:capitalize}
+.workspace-manager-option{display:flex;align-items:center;gap:8px;margin-top:12px}
+.workspace-manager-option input{width:auto}
+#workspace-policy-status{margin:8px 0}
+@media(max-width:640px){.workspace-policies{font-size:12px}#workspace-policy-fields{grid-template-columns:1fr}.workspace-policy-picker{gap:4px}}

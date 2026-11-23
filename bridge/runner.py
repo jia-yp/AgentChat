@@ -17,6 +17,8 @@ from .projects import native_project
 from .processes import background_options
 from .execution import ExecutionGuard, cancel_job
 from .session_changes import SessionChanges
+from . import lifecycle
+from .file_tools import FileTools
 from .context_window import ContextWindow
 from . import codex_live
 from .permission_settings import report as permission_report, options as permission_options, summary as permission_summary
@@ -71,6 +73,7 @@ class Bridge:
             if settings['mode'] not in {x['id'] for x in permission_options(session['definition'])}:
                 raise ValueError('服务端返回不支持的权限选项')
             session['definition']['permissions']=settings['mode']
+            session['permission_source']=settings.get('source','session')
             session['permission_revision']=settings['revision']
             write_json(session['context'],session)
 
@@ -133,6 +136,7 @@ Windows PowerShell: & "{root/'bridge/sessions.ps1'}" -Request {change['id']} -Ac
                 rounds+='\n【最后一轮，必须收尾】不再继续工作，不执行新的工具操作，不再分派或请求下一轮。请基于已有信息，做出这一轮对话最后的决定与总结，说明完成内容、结论及尚未解决事项，直接 @管理员 汇报。'
                 rounds+=('你不再接收这一轮任务；其他 session 按各自剩余额度继续。' if budget.get('mode')=='individual' else '服务端不会继续触发任何下一轮任务。')
         manager=''
+        root=Path(__file__).resolve().parent.parent
         recovery_note=''
         if delivery.get('recovery_mode'):
             recovery_note=('这是原任务中断后的继续：沿用当前原生 session，先检查已有成果，再继续未完成部分，不重复已经完成的操作。'
@@ -142,11 +146,13 @@ Windows PowerShell: & "{root/'bridge/sessions.ps1'}" -Request {change['id']} -Ac
 你可以按管理员要求调整本 bridge 的 session 模型与开关、管理项目文件、检查 harness 设置。
 你的专属 workspace：{session.get('manager_workspace',session['temp_dir'])}。项目根目录是 {self.workspace}，同 harness 的 worker 与你使用同一个项目。
 管理命令和边界见 {Path(session['context']).parent/'MANAGER.md'}。使用自己的身份；不要读取或输出其他 session 的 token。
+管理员私下要求增减成员时，使用 mcp__agentchat__sessions，或 python "{root/'agentchat.py'}" sessions --action list/create/leave/rejoin/cancel-leave（Windows 可用 "{root/'bridge/sessions.ps1'}" -Action ...）。create 用 --roles 本地JSON文件；退出/加入用 --member 名称；变更带稳定 --nonce 编号，立即退出才加 --immediate。新增角色继承此 workspace 默认权限；不要编造角色或提供权限覆盖。先 list 确认成员及状态。pending 只代表已提交，本地完成后有私有回执，不循环等待。已托管会话用 rejoin 保留原生 ID；外部 Codex/Claude 会话可在角色里指定 attach_native_id，首次启用时分叉历史。Desktop 转入尚未实现。
 '''
         prefix=f'''你是 AgentChat 群聊「{snapshot['room']['name']}」中的 @{session['name']}。
 你的唯一分工：{session['definition']['role']}
 共享项目根目录：{self.workspace}
 你的私人临时目录：{session['temp_dir']}
+{FileTools.instructions(session,delivery)}
 本次执行权限（由管理员设置）：{permission_summary(session['definition'])}。权限变更从下一项任务生效。若 SSH 或工具被拒绝，在群聊说明具体原因，请管理员到群聊管理页调整你的执行权限；不要自行修改权限或反复请求本地弹窗。
 你的角色说明和群聊 skill：{Path(session['context']).parent/'ROLE.md'}
 {manager}
@@ -161,8 +167,8 @@ Windows PowerShell: & "{root/'bridge/sessions.ps1'}" -Request {change['id']} -Ac
 - 不需要每条消息都再分派；不要无意义地互相致谢。完成任务后向发起人汇报。
 - 可用环境变量 AGENTCHAT_CONTEXT 对应的本地 CLI 读取全部历史或主动发送消息；只使用自己的身份凭证，不读取或输出其他 session/bridge 的 token。
 - 普通消息会排队。需要在对方当前工作中纠偏时，可选择 Steer：先用 members 读取目标最新 active_task.ref，确认其 steer_supported，然后 send --mode steer --task <ref> --text "@目标 补充信息"。只能指定一个正在工作的 agent，不广播、不自动改投下一项任务。每个任务最多 8 条、合计 16000 字，每条最多 4000 字，至少间隔 2 秒。
-- 若有 mcp__agentchat__members / history / send，优先使用这些专用工具，不需要执行 shell。send 的参数为 body、nonce、mode（normal 或 steer），Steer 还需 task（active_task.ref）。工具仅使用你自己的身份。
-- Steer 命令：Python 使用 "{sys.executable}" "{Path(__file__).resolve().parents[1]/'agentchat.py'}"；Windows 可用 & "{Path(__file__).parent/'chat.ps1'}" -Action members，或 -Action send -Mode steer -Task <ref> -Text "@目标 补充信息"。已注入仅表示 harness 接受输入，不能声称对方已经理解。
+- 有专用 AgentChat MCP 工具时优先使用；Claude 的工具名为 mcp__agentchat__members / history / send。没有暴露这些工具时，使用上方群聊请求文件，不要猜测不存在的工具或更改系统权限。send 的参数为 body、nonce、mode（normal 或 steer），Steer 还需 task（active_task.ref）。工具仅使用你自己的身份。
+- Windows 没有 MCP 时优先使用 & "{Path(__file__).parent/'chat.ps1'}" -Action members，或 -Action send -Text "@目标 内容" -Nonce <稳定编号>；Steer 再加 -Mode steer -Task <ref>。其他系统的 CLI 为 "{sys.executable}" "{Path(__file__).resolve().parents[1]/'agentchat.py'}"。不要使用 Windows PATH 中的 python 应用别名，不要放宽系统脚本策略；工具不可用时报告具体错误。已注入仅表示 harness 接受输入，不能声称对方已经理解。
 - 如需要人工澄清或权限，在群聊 @管理员 提出，不要等待本地交互弹窗。
 - 最终回复是一条要发到群聊的消息，必须用 @目标 开头。默认回复 @{message['sender_name']}。只写对群成员有用的结果。
 
@@ -190,6 +196,8 @@ Windows PowerShell: & "{root/'bridge/sessions.ps1'}" -Request {change['id']} -Ac
                 write_json(journal,payload)
             while not self.stop.is_set() and not job['cancel'].is_set():
                 try:
+                    if job.get('file_tools') and not job['file_tools'].drain(final=True):
+                        self.stop.wait(1);continue
                     self.client.call(f'/api/bridge/deliveries/{delivery["id"]}/finish',payload)
                     break
                 except APIError as exc:
@@ -219,6 +227,7 @@ Windows PowerShell: & "{root/'bridge/sessions.ps1'}" -Request {change['id']} -Ac
             except Exception:
                 pass
         finally:
+            if job.get('file_tools'):job['file_tools'].close()
             write_json(session['context'],session)
             with self.lock:
                 self.running.pop(session['id'],None)
@@ -246,6 +255,9 @@ Windows PowerShell: & "{root/'bridge/sessions.ps1'}" -Request {change['id']} -Ac
                 prepare(session,home,cancelled=cancelled)
         session['runtime']=configured_runtime(session)
         write_json(session['context'],session)
+        if delivery.get('lease') and session.get('url') and session.get('token'):
+            job['file_tools']=FileTools(session,delivery,job['cancel'])
+            job['file_tools'].start()
         prompt=self.prompt(session,delivery)
         job['context_plan']=getattr(prompt,'context',None)
         cmd=build_command(session,folder,self.workspace)
@@ -333,6 +345,7 @@ Windows PowerShell: & "{root/'bridge/sessions.ps1'}" -Request {change['id']} -Ac
         requested=time.monotonic()
         result=self.client.call('/api/bridge/heartbeat',{
             'session_changes_supported':True,'workspace':str(self.workspace),'project_name':self.config.get('project_name',''),
+            'workspace_supported':True,
             'sessions':[{'id':s['id'],'native_id':s.get('native_id',''),'detail':s.get('detail',''),
                          'model':s['definition'].get('model','') if s.get('config_revision') else configured_model(s['definition']),
                          'config_revision':s.get('config_revision',0),'model_control':supports_model(s['definition']),
@@ -363,6 +376,7 @@ Windows PowerShell: & "{root/'bridge/sessions.ps1'}" -Request {change['id']} -Ac
         for settings in result.get('permission_settings',[]):
             if settings['id'] in self.sessions:self.apply_permissions(self.sessions[settings['id']],settings)
         if getattr(self,'session_changes',None):self.session_changes.poll(result.get('session_changes',[]))
+        lifecycle.sync(self,result.get('session_transitions',[]))
         self.last_heartbeat=time.monotonic()
         write_json(self.path.with_suffix('.status.json'),{'pid':os.getpid(),'heartbeat':time.time(),'room':self.config['room']['name'],'sessions':[s['name'] for s in self.sessions.values()],'running':len(jobs)})
 
@@ -387,7 +401,7 @@ Windows PowerShell: & "{root/'bridge/sessions.ps1'}" -Request {change['id']} -Ac
                                 self.steer_capabilities[entry['id']]=codex_live.capable(self.sessions[entry['id']])
                         self.heartbeat()
                         for mid,session in self.sessions.items():
-                            if session.get('revoked'):continue
+                            if session.get('revoked') or session.get('departing'):continue
                             with self.lock:
                                 if mid in self.running:continue
                             if not self.prepare_project(session):continue
