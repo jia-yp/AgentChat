@@ -254,7 +254,7 @@ Windows PowerShell: & "{root/'bridge/sessions.ps1'}" -Request {change['id']} -Ac
         (folder/'last-response.txt').unlink(missing_ok=True)
         run_id=f'{delivery["id"]}-{int(time.time())}'
         logdir=folder/'logs';logdir.mkdir(exist_ok=True)
-        env=harness_environment()
+        env=harness_environment(harness=session['definition']['harness'])
         if session['definition']['harness']=='codex':
             from .codex_isolation import environment
             env=environment(session,env)

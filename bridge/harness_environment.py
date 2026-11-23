@@ -11,10 +11,16 @@ DESKTOP_STATE = {
 }
 
 
-def harness_environment(source=None):
+def harness_environment(source=None, *, harness=None):
     env=dict(os.environ if source is None else source)
     for key in DESKTOP_STATE:
         env.pop(key,None)
     # Credentials/config homes and user-selected proxy settings are preserved.
     env.pop('AGENTCHAT_JOIN_TOKEN',None)
+    if harness=='antigravity':
+        # AGY's detached auto-updater can open Windows Terminal despite the
+        # harness inheriting a hidden console, including during `agy models`.
+        # Managed queries/tasks must not spawn it or replace a running binary.
+        # This is child-only; ordinary interactive `agy update` is unaffected.
+        env['AGY_CLI_DISABLE_AUTO_UPDATE']='true'
     return env
