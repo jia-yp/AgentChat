@@ -15,7 +15,7 @@ sys.path.insert(0,str(ROOT))
 from bridge.common import read_json,write_json
 
 FOLDER=ROOT/'.runtime/permissions-qa'
-SSH_TARGET=os.environ.get('AGENTCHAT_SSH_TARGET','user@nas-host')
+SSH_TARGET=os.environ.get('AGENTCHAT_SSH_TARGET','user@your-server')
 
 
 def wait(fn,seconds=180):

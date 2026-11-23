@@ -370,7 +370,7 @@ Windows PowerShell: & "{root/'bridge/sessions.ps1'}" -Request {change['id']} -Ac
         with self.lock:
             for job in self.running.values():
                 if time.monotonic()>=job['lease_deadline']:
-                    cancel_job(job,'lease_expired','执行已停止：NAS 连接中断，任务租约未能在到期前续期')
+                    cancel_job(job,'lease_expired','执行已停止：与服务器的连接中断，任务租约未能在到期前续期')
 
     def run(self):
         with ProcessLock(self.path.with_suffix('.lock')):
@@ -412,7 +412,7 @@ Windows PowerShell: & "{root/'bridge/sessions.ps1'}" -Request {change['id']} -Ac
                         if exc.status in (401,403):raise RuntimeError('bridge 身份已失效或被撤销：'+str(exc)) from None
                         print('服务暂不可用：'+str(exc),flush=True)
                     except OSError:
-                        print('NAS 连接中断，正在重连',flush=True)
+                        print('与服务器的连接中断，正在重连',flush=True)
                     # Ownership expires according to the server's lease, not an
                     # unrelated local timer or how long the model has been quiet.
                     self.check_leases()

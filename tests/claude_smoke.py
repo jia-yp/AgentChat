@@ -1,7 +1,7 @@
-"""Opt-in real Claude/NAS round trip and native resume test (two model turns).
+"""Opt-in real Claude/remote-server round trip and native resume test (two model turns).
 
-Run: python tests/claude_smoke.py --ssh user@nas-host
-Uses a disposable NAS container and its downloaded client; never production data.
+Run: python tests/claude_smoke.py --ssh user@your-server
+Uses a disposable container on the remote Docker host and its downloaded client; never production data.
 """
 import argparse
 import io
