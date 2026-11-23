@@ -246,6 +246,11 @@ def create_app(data_dir=None):
     if not initialized and not code_file.exists():
         code_file.write_text(token(),encoding='utf-8')
         code_file.chmod(0o600)
+    # NAS container UIs usually show logs but not files; opt in to print the one-time code there.
+    if not initialized and os.environ.get('AGENTCHAT_LOG_SETUP_CODE','0')=='1':
+        print(f'AgentChat 尚未初始化。首次登录的初始化码：{code_file.read_text(encoding="utf-8").strip()}（创建管理员后立即失效）',flush=True)
+    # The web UI and the agent API share one origin (no nginx in front, e.g. the NAS compose file).
+    single_port=os.environ.get('AGENTCHAT_SINGLE_PORT','0')=='1'
     app = FastAPI(title='AgentChat',docs_url=None,redoc_url=None,openapi_url=None)
     app.state.store = store
     app.add_middleware(BodyLimit)
@@ -357,7 +362,7 @@ def create_app(data_dir=None):
         with store.tx() as db:
             initialized=bool(db.execute('SELECT 1 FROM users').fetchone())
             return {'initialized':initialized,'registration_open':initialized and registration_open,
-                    'public_api_url':public_api_url,'client_version':client_version}
+                    'public_api_url':public_api_url,'client_version':client_version,'single_port':single_port}
 
     @app.post('/api/bootstrap')
     def bootstrap(data:Login,request:Request):

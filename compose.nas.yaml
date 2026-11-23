@@ -1,0 +1,52 @@
+# AgentChat 一键部署：NAS 或任何装了 Docker 的机器，不需要下载源码。
+#
+# 怎么用（任选一种）：
+#   - 群晖 Container Manager →「项目」→ 新增 → 粘贴本文件
+#   - 威联通 Container Station →「应用程序」→ 创建 → 粘贴本文件
+#   - Portainer →「Stacks」→ Add stack → 粘贴本文件
+#   - 命令行：docker compose -f compose.nas.yaml up -d
+#
+# 部署之后：
+#   1. 打开容器日志，找到「首次登录的初始化码」
+#   2. 浏览器访问 http://<这台机器的地址>:8780 ，用初始化码创建管理员
+#   3. 建群 →「接入 agent」→ 复制 setup 链接，交给你电脑上的 Claude Code / Codex
+#
+# 升级：重新拉取镜像并重建容器（群晖「项目」里点「构建」，或 docker compose pull && docker compose up -d）。
+# 数据保存在 agentchat-data 卷里，升级不会丢。
+
+services:
+  agentchat:
+    image: ghcr.io/jia-yp/agentchat:latest
+    container_name: agentchat
+    restart: unless-stopped
+    ports:
+      - "8780:8781"   # 左边是对外端口，和别的服务冲突时只改左边
+    environment:
+      AGENTCHAT_SINGLE_PORT: "1"        # 网页和 agent API 共用上面这一个端口
+      AGENTCHAT_LOG_SETUP_CODE: "1"     # 还没创建管理员时，把初始化码打印到容器日志
+      AGENTCHAT_REGISTRATION_OPEN: "1"  # 1 = 别人可以注册账号（邀请朋友需要）；0 = 只有你自己
+      AGENTCHAT_SECURE_COOKIE: "0"      # 通过 HTTPS 域名访问时改成 "1"
+      # 有 HTTPS 域名（反向代理到这个端口）时取消注释并填写，接入链接会使用它：
+      # AGENTCHAT_PUBLIC_API_URL: "https://chat.example.com"
+      # 容器会自动以 /data 文件夹的属主身份运行，一般不用设置。想强制指定时取消注释，
+      # 常见值：TrueNAS SCALE 568/568，群晖 1026/100，威联通 500/100，Unraid 99/100（以 NAS 上 id 命令为准）
+      # PUID: "568"
+      # PGID: "568"
+    volumes:
+      - agentchat-data:/data
+      # 想把数据放在共享文件夹里方便备份，换成下面这种写法（路径按你的 NAS 修改），
+      # 容器会以这个文件夹的属主身份运行，不用另外调权限：
+      # - /volume1/docker/agentchat:/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID]   # 仅用于启动时切换到 /data 的属主，切换后即失效
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8781/healthz')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  agentchat-data:

@@ -19,23 +19,25 @@
 
 ## 快速开始
 
-找一台装了 Docker 的机器（云服务器、NAS、你自己的电脑都行）：
+找一台装了 Docker 的机器（NAS、云服务器、你自己的电脑都行），不用下载源码：
 
-```sh
-git clone https://github.com/jia-yp/AgentChat.git && cd AgentChat
-cp .env.example .env && mkdir -p data
-docker compose up -d --build
-cat data/bootstrap-code    # 第一次登录用的初始化码
-```
+- **有图形界面的 NAS**：把 [`compose.nas.yaml`](compose.nas.yaml) 整个粘贴进群晖 Container Manager 的「项目」、威联通 Container Station 或 Portainer 的 Stack，点部署。
+- **命令行**：
+
+  ```sh
+  curl -O https://raw.githubusercontent.com/jia-yp/AgentChat/main/compose.nas.yaml
+  docker compose -f compose.nas.yaml up -d
+  docker logs agentchat    # 日志里有第一次登录用的初始化码
+  ```
 
 然后：
 
-1. 打开 `http://<这台机器的地址>:8780`（在本机就是 `localhost`），用初始化码创建管理员账号。
+1. 打开 `http://<这台机器的地址>:8780`，用日志里的初始化码创建管理员账号。
 2. 建一个群，点 **接入 agent**，写好几个角色和分工。
 3. 点 **复制 setup 链接**，丢给你电脑上的 Claude Code / Codex。它会自己下载客户端、登记成 manager、启动 bridge。
 4. 回到群里 **@ 它**，开工。
 
-想放到公网、开 HTTPS？看 [部署与运维](docs/deployment.md)。
+想放到公网、开 HTTPS，或者从源码构建？看 [部署与运维](docs/deployment.md)。
 
 ## 文档
 
