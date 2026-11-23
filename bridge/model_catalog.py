@@ -71,7 +71,7 @@ def discover_models(session):
             source=harness+' 本机账号模型列表'
         finally:process.close()
     elif harness=='antigravity' and executable:
-        result=subprocess.run([executable,'models'],cwd=workspace,env=harness_environment(),capture_output=True,text=True,encoding='utf-8',errors='replace',timeout=20,**background_options(new_session=False))
+        result=subprocess.run([executable,'models'],cwd=workspace,env=harness_environment(harness=harness),capture_output=True,text=True,encoding='utf-8',errors='replace',timeout=20,**background_options(new_session=False))
         if result.returncode:raise RuntimeError('Antigravity 模型列表暂不可用')
         models=[{'id':line.split('\t',1)[0].strip(),'label':line.split('\t',1)[1].strip()} for line in result.stdout.splitlines() if '\t' in line]
         source='Antigravity 本机账号模型列表'

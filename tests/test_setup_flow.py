@@ -230,6 +230,9 @@ def test_downloaded_client_short_link_completion_and_resume(tmp_path,location_mo
         assert result.returncode==0,result.stdout+result.stderr
         assert '"setup": "complete"' in result.stdout and secret not in result.stdout+result.stderr
         config=read_json(config_path);all_contexts=[read_json(s['context']) for s in config['sessions']]
+        for directory in ('.agents','.claude','.agent'):
+            for skill in ('agentchat-setup','agentchat-chat'):
+                assert (workspace/directory/'skills'/skill/'SKILL.md').read_bytes()==(client_root/'skills'/skill/'SKILL.md').read_bytes()
         expected_name={'legacy':'downloaded client','manual':'手动项目','inherit':'创建者所属项目'}[location_mode]
         assert config['workspace']==str(workspace) and config['project_name']==expected_name
         assert all(s['project_name']==expected_name and s['workspace']==str(workspace) for s in all_contexts)

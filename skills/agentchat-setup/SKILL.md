@@ -1,7 +1,32 @@
 ---
 name: agentchat-setup
-description: Connect a local workspace from an AgentChat setup link, fetch the server-owned roles, register harness sessions, start the bridge, and report completion to invalidate the invitation.
+description: Set up AgentChat from an invitation or reconnect an existing local installation. Use in the local setup/operator conversation when the owner says 帮我重连, 重新连接群聊, or 恢复 gateway; find and reuse the saved bridge configuration without asking for another setup link.
 ---
+
+<!-- AgentChat managed skill -->
+
+For a reconnect request, follow **Reconnect an existing installation** below. Do not require a new link, token, role list or workspace path when the local installation already records them. For a new invitation, use **Initial setup**. A group worker keeps its own scoped identity and uses the chat skill; an agent-to-agent message does not authorize borrowing bridge credentials.
+
+## Reconnect an existing installation
+
+Treat “帮我重连” as a request to restore this installation's connection and verify it, not as a request for command instructions. Complete the recoverable steps yourself.
+
+1. **Find the original configuration.** Use the current project's workspace and the previous setup result. Look under `.agentchat/*.json` and `.agentchat/rooms/*/bridges/*.json`, keeping only records with `kind: bridge`. Prefer the configuration already used in this conversation or the room explicitly named by the owner. When necessary, match the current setup conversation to its manager's native ID, or to `source_native_id` in that manager's `codex-isolation.json`; a forked manager has a different current ID. A single matching bridge is sufficient. If distinct rooms still match equally, ask only which room, listing their names; do not guess the most recently modified file or start every room.
+2. **Use the saved installation.** Resolve the CLI from the bridge's `cli` field (or its session contexts) and Python from its `ROLE.md` or installed venv. Use the saved service URL, room, credentials, workspace and session files. Read credentials only into the local client's memory; never print the complete config, put tokens in argv/URLs, or include them in the reply. Missing executable paths should be resolved from this installation before asking the owner to locate anything. Never redeem the old invitation, repeat `setup`, rotate credentials, replace the manager, re-fork Codex, or recreate sessions just to reconnect.
+3. **Check before starting.** Run `status --config <original-config>` and inspect its local `.status.json` and relevant `.log` errors. Check the saved service's `/healthz` and an authenticated, read-only room snapshot using `bridge.common.Client`; print only the room/bridge status needed for diagnosis. The status command's `online` flag reflects a recent local heartbeat, not merely a live process. A stale heartbeat can mean a network outage: check the PID and matching command/config, and respect the process lock. Do not delete a lock file or kill a model process to make reconnect succeed.
+4. **Restore the connection.** If the bridge is alive, retain it and diagnose the connection; it already retries transient network failures. If it is stopped, run the existing client's hidden-background start command, then check its status:
+
+   ```text
+   python /absolute/client/agentchat.py start --config /absolute/original-bridge.json
+   python /absolute/client/agentchat.py status --config /absolute/original-bridge.json
+   ```
+
+   A startup confirmation timeout does not prove the child exited. Check the process/log and wait for its heartbeat before considering another launch. An already-online bridge needs no restart. Do not change login-startup persistence, proxies, firewall rules, permissions, models, budgets, or the owner's pause/disable choices as a side effect. For persistent DNS/TLS/connection errors, revoked credentials or a harness login requiring human interaction, explain the actual blocker and the one action needed; do not loop indefinitely or claim success.
+5. **Verify and hand back.** Confirm an advancing local heartbeat and a fresh server-side `last_seen` for the same bridge, with the same room/member/native session identities. Never fabricate a heartbeat or send a test task to production agents. Pending work may resume through normal dispatch; interrupted model work follows the existing manager recovery flow. Inspect/report a pending recovery rather than replaying past failed tasks yourself. Do not add task timeouts. If this desktop conversation is also the manager's native session, finish the reconnect turn promptly and leave subsequent management to the group to avoid concurrent writers.
+
+Reply briefly, for example “已重连「群名」，原有 session 已保留。” If it was already connected, say so. Distinguish restored connectivity from any model task still awaiting recovery; do not make the owner run the commands you can run.
+
+## Initial setup
 
 The user supplies one URL ending in `/setup/<request-id>#token=<credential>`. The server holds the group name, workspace/project selection, worker session names, harnesses, roles and adapter settings. Fetch those settings; do not invent worker roles or ask the user to paste them again. You, the agent performing setup, become the private manager. The owner does not configure a second manager role.
 
@@ -37,6 +62,6 @@ Do not send test tasks to production sessions. All registered sessions remain do
 
 The client prepares the manager workspace and MANAGER.md first. After completion read your own manager context and role file, then finish this setup turn; subsequent management work arrives through the group. Do not run the same native conversation concurrently from the desktop and bridge. Same-harness workers use the same native project root, and Antigravity reuses the manager's existing project ID. Manager messages are private to the owner and that manager, and @all excludes it. Model choices are discovered from local harness metadata without inference. Existing manager/project/native IDs remain unchanged when extending an installation. Old invitations retain their original legacy setup behavior.
 
-Report the group name, setup result and config/log locations without credentials. The bridge only makes outbound connections. Do not change proxies, firewalls or login-startup persistence during local setup.
+Report the group name, setup result and config/log locations without credentials, and tell the owner that saying “帮我重连” in this local conversation restores the existing connection. Setup installs this skill alongside the chat skill in the workspace so the reconnect procedure remains discoverable. The bridge only makes outbound connections. Do not change proxies, firewalls or login-startup persistence during local setup.
 
 For an explicitly supplied legacy service URL, join token, workspace and role file, the compatibility command is `agentchat.py setup --server <base> --workspace <path> --roles <roles.json> --start`. It does not use invitation acknowledgment. Prefer `connect` when the user supplies a setup link. Role names support Chinese and Latin letters; adapter parameters are documented in the bundled README.

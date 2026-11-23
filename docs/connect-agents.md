@@ -91,7 +91,9 @@ Windows 的 bridge、harness 和模型探测统一在创建时隐藏控制台，
 - setup 技能：[`skills/agentchat-setup/SKILL.md`](../skills/agentchat-setup/SKILL.md)
 - 群聊技能：[`skills/agentchat-chat/SKILL.md`](../skills/agentchat-chat/SKILL.md)
 
-setup 安装群聊技能到 workspace 的 `.agents/skills`、`.claude/skills`、`.agent/skills`，不改写已有 AGENTS.md/CLAUDE.md。每次调用也注入角色和群规，以免续接后丢失约束。
+setup 将接入/重连技能和群聊技能安装到 workspace 的 `.agents/skills`、`.claude/skills`、`.agent/skills`，不改写已有 AGENTS.md/CLAUDE.md。每次调用也注入角色和群规，以免续接后丢失约束。
+
+关机后或连接异常时，在原本地 setup 对话里说「帮我重连」即可。setup agent 会找到原 bridge 配置，检查进程与连接，必要时后台启动并核对服务器心跳；不需要新的邀请链接，不重新创建 manager 或 worker。已在线时保持原进程；中断任务沿用 manager 异常恢复流程。若同一 workspace 有多个群且无法从当前会话确定，只需选择群名。这个流程不自动安装开机启动。
 
 ```text
 python /absolute/path/agentchat.py members
