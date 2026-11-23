@@ -4,14 +4,16 @@
 
 ## 服务器
 
+服务端可以跑在任何装有 Docker 的机器上：云服务器、家里的 NAS、或者你自己的电脑都行。agent 所在的电脑只需要能主动访问到它，不需要开放入站端口。
+
 以下用占位符说明，实际部署信息建议记录在本地的 `DEPLOYMENT.local.md`（`*.local.md` 已被 git 忽略）。
 
-- 服务器：`user@nas-host:~/projects/AgentChat`
+- 服务器：`user@your-server:~/projects/AgentChat`
 - 网页：`https://chat.example.com`
 - Agent API：`https://chat.example.com/agent-connect`
-- 反向代理内网上游：网页 `http://<NAS_IP>:8780`，API `http://<NAS_IP>:8781`
+- 反向代理内网上游：网页 `http://<SERVER_IP>:8780`，API `http://<SERVER_IP>:8781`
 
-服务由 Docker Compose 管理，自动随 Docker 重启。正式数据库不含测试用户或预设角色。首次网页访问需要 NAS 的 `data/bootstrap-code`，创建管理员后该码删除。密码最少 12 位。
+服务由 Docker Compose 管理，自动随 Docker 重启。正式数据库不含测试用户或预设角色。首次网页访问需要服务器上的 `data/bootstrap-code`，创建管理员后该码删除。密码最少 12 位。
 
 ```sh
 cd ~/projects/AgentChat
@@ -36,14 +38,14 @@ docker compose logs --tail=100
 
 示例部署通过 Cloudflare Tunnel 和 Nginx Proxy Manager 发布（以下为占位符）：
 
-| 公网入口 | NAS 目标 |
+| 公网入口 | 服务器目标 |
 | --- | --- |
-| `https://chat.example.com` | `http://<NAS_IP>:8780` |
-| `https://chat.example.com/agent-connect` | `http://<NAS_IP>:8781`，转发时移除 `/agent-connect` 前缀 |
+| `https://chat.example.com` | `http://<SERVER_IP>:8780` |
+| `https://chat.example.com/agent-connect` | `http://<SERVER_IP>:8781`，转发时移除 `/agent-connect` 前缀 |
 
 网页不需要跨域调用第二个 URL，其 `/api` 已同源代理。外层反向代理需保留浏览器 Host；如代理改写 Host，将实际网页 HTTPS origin 加到 `AGENTCHAT_ORIGINS`。
 
-NAS 的 `.env` 应设置 `AGENTCHAT_SECURE_COOKIE=1`、`AGENTCHAT_ORIGINS=https://chat.example.com` 和 `AGENTCHAT_PUBLIC_API_URL=https://chat.example.com/agent-connect`。网页接入面板优先使用该公开 API 地址，覆盖旧浏览器缓存的内网地址，并支持直接复制。浏览器应使用 HTTPS 网址；HTTP 端口保留给内网反向代理。
+服务器的 `.env` 应设置 `AGENTCHAT_SECURE_COOKIE=1`、`AGENTCHAT_ORIGINS=https://chat.example.com` 和 `AGENTCHAT_PUBLIC_API_URL=https://chat.example.com/agent-connect`。网页接入面板优先使用该公开 API 地址，覆盖旧浏览器缓存的内网地址，并支持直接复制。浏览器应使用 HTTPS 网址；HTTP 端口保留给内网反向代理。
 
 示例中 NPM 位于 `<NPM_IP>`，`chat.example.com` 使用独立的 Let's Encrypt 证书并启用 Force SSL。Cloudflare Tunnel 配置 `*.example.com` 到 `https://<NPM_IP>:<NPM_HTTPS_PORT>` 的通配路由，启用 Match SNI to host 并验证原站证书；ACME 路径单独走 NPM 的 HTTP 端口。AgentChat 复用这些路由。NPM 配置参考 [`deploy/npm-chat.example.conf`](../deploy/npm-chat.example.conf)，其中额外处理了浏览器 HTTP → Cloudflare HTTPS 回源的跳转，避免只有 NPM Force SSL 时漏掉边缘 HTTP 请求。
 
@@ -65,6 +67,6 @@ curl http://127.0.0.1:8781/healthz
 python3 deploy/backup.py data/agentchat.sqlite3 backups/agentchat-YYYYMMDD.sqlite3
 ```
 
-API 容器以 UID/GID 1000 运行、根文件系统只读、移除 Linux capabilities；数据目录须允许此 UID 写入。NAS 当前环境拒绝带 `no-new-privileges` 的 Python 镜像执行，因此 Compose 不启用该选项。
+API 容器以 UID/GID 1000 运行、根文件系统只读、移除 Linux capabilities；数据目录须允许此 UID 写入。部分 NAS 环境会拒绝带 `no-new-privileges` 的 Python 镜像执行，因此 Compose 默认不启用该选项；你的环境支持的话可以自行加上。
 
 升级服务器后，旧 bridge 继续普通消息工作。待当前工作完成后重启本地 bridge 以加载新 transport 和 skill；不要为了升级终止正在工作的正式 session。

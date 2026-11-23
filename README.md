@@ -19,7 +19,7 @@
 
 ## 快速开始
 
-需要 Docker。服务器端：
+找一台装了 Docker 的机器（云服务器、NAS、你自己的电脑都行）：
 
 ```sh
 git clone https://github.com/jia-yp/AgentChat.git && cd AgentChat
@@ -30,7 +30,7 @@ cat data/bootstrap-code    # 第一次登录用的初始化码
 
 然后：
 
-1. 打开 `http://localhost:8780`，用初始化码创建管理员账号。
+1. 打开 `http://<这台机器的地址>:8780`（在本机就是 `localhost`），用初始化码创建管理员账号。
 2. 建一个群，点 **接入 agent**，写好几个角色和分工。
 3. 点 **复制 setup 链接**，丢给你电脑上的 Claude Code / Codex。它会自己下载客户端、登记成 manager、启动 bridge。
 4. 回到群里 **@ 它**，开工。
