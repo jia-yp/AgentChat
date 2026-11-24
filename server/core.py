@@ -11,7 +11,7 @@ from pathlib import Path
 
 from bridge.names import NAME_PATTERN, normalize_name
 from bridge.roles import worker_roles
-from . import steering, permissions, synchronous, reading, recall, recovery, session_changes, guests, workspaces, lifecycle
+from . import steering, permissions, synchronous, reading, recall, recovery, session_changes, guests, workspaces, lifecycle, uploads
 
 LEASE_SECONDS=90
 
@@ -142,6 +142,7 @@ class Store:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         with self.tx() as db:
             db.executescript(SCHEMA)
+            db.executescript(uploads.SCHEMA)
             db.executescript(guests.SCHEMA)
             db.executescript(permissions.SCHEMA)
             db.executescript(workspaces.SCHEMA)
@@ -152,7 +153,7 @@ class Store:
             steering.initialize(db)
             for table,columns in {
                 'rooms':{'max_rounds':'INTEGER NOT NULL DEFAULT 8','round_mode':"TEXT NOT NULL DEFAULT 'global'",'session_rounds':"TEXT NOT NULL DEFAULT '{}'",'session_speaks':"TEXT NOT NULL DEFAULT '{}'"},
-                'members':{'human_role':"TEXT NOT NULL DEFAULT ''",'runtime':"TEXT NOT NULL DEFAULT '{}'",'session_type':"TEXT NOT NULL DEFAULT 'worker'",'disabled_reason':"TEXT NOT NULL DEFAULT ''",'steer_supported':'INTEGER NOT NULL DEFAULT 0','sync_supported':'INTEGER NOT NULL DEFAULT 0',
+                'members':{'human_role':"TEXT NOT NULL DEFAULT ''",'runtime':"TEXT NOT NULL DEFAULT '{}'",'session_type':"TEXT NOT NULL DEFAULT 'worker'",'disabled_reason':"TEXT NOT NULL DEFAULT ''",'steer_supported':'INTEGER NOT NULL DEFAULT 0','sync_supported':'INTEGER NOT NULL DEFAULT 0','uploads_supported':'INTEGER NOT NULL DEFAULT 0',
                            'deleted_at':'REAL NOT NULL DEFAULT 0','lifecycle_supported':'INTEGER NOT NULL DEFAULT 0','summary_supported':'INTEGER NOT NULL DEFAULT 0','bubble_color':"TEXT NOT NULL DEFAULT ''",'avatar':"TEXT NOT NULL DEFAULT ''",'claims_paused_until':'REAL NOT NULL DEFAULT 0','departing':'INTEGER NOT NULL DEFAULT 0'},
                 'messages':{'max_rounds':'INTEGER NOT NULL DEFAULT 8','stopped':'INTEGER NOT NULL DEFAULT 0',
                             'runtime':"TEXT NOT NULL DEFAULT '{}'",'recipient_names':"TEXT NOT NULL DEFAULT ''",'private_to':"TEXT NOT NULL DEFAULT ''",
@@ -582,12 +583,16 @@ class Store:
             msg['session_rounds']={k:v for k,v in msg['session_rounds'].items() if k not in hidden}
         msg.pop('recipient_names',None)
         msg['targets'] = json.loads(msg['targets'])
+        if not msg['recalled_at'] and (files := uploads.metadata(db, msg['id'])):
+            msg['attachments'] = files
         if msg['reply_to']:
             quote = db.execute('SELECT m.id,m.body,m.created,s.name FROM messages m JOIN members s ON s.id=m.sender WHERE m.id=? AND m.room=?',(msg['reply_to'],msg['room'])).fetchone()
             original=db.execute('SELECT * FROM messages WHERE id=?',(msg['reply_to'],)).fetchone()
             msg['quote'] = dict(quote) if quote and (not actor or (visible_message(actor,original) and synchronous.readable(db,actor,original))) else None
             if msg['quote'] and original['recalled_at']:
                 msg['quote']['body']=recall.NOTICE;msg['quote']['recalled_at']=original['recalled_at']
+            elif msg['quote'] and (files := uploads.metadata(db, original['id'])):
+                msg['quote'].update(attachments=files, private_to=original['private_to'])
         msg['deliveries'] = [dict(x) for x in db.execute('SELECT d.id,d.member,s.name,d.status,d.error,d.attempts FROM deliveries d JOIN members s ON s.id=d.member WHERE d.message=?',(msg['id'],))]
         for delivery in msg['deliveries']:
             delivery['steer_option']=steering.offer(db,actor,row,delivery)
@@ -598,9 +603,10 @@ class Store:
             msg['body']=recall.NOTICE;msg['quote']=None;msg['targets']=[]
         return msg
 
-    def post_in(self, db, room_id, actor, body, nonce, reply_to=None, cause=None, to=None, max_rounds=None, runtime=None, round_mode=None, session_rounds=None, delivery_mode='normal', steer_task='', session_speaks=None, _summary=False, _recovery=False):
+    def post_in(self, db, room_id, actor, body, nonce, reply_to=None, cause=None, to=None, max_rounds=None, runtime=None, round_mode=None, session_rounds=None, delivery_mode='normal', steer_task='', session_speaks=None, _summary=False, _recovery=False, attachment_ids=None):
         room = self.access(db, room_id, actor,manage=False)
         if actor['kind']=='user' and actor['_room_role']=='observer':raise Problem('观察者只能阅读；请联系创建者调整为参与者',403)
+        if attachment_ids and actor['kind']!='user':raise Problem('只有群聊用户可以发送附件',403)
         synchronous.settle(db,room_id)
         steering.settle(db)
         if delivery_mode not in ('normal','steer'):raise Problem('未知的消息投递模式')
@@ -621,6 +627,8 @@ class Store:
         sender = actor['id']+':'+room_id if actor['kind']=='user' else actor['id']
         existing = db.execute('SELECT * FROM messages WHERE room=? AND sender=? AND nonce=?',(room_id,sender,nonce)).fetchone()
         if existing:
+            if [file['id'] for file in uploads.metadata(db, existing['id'])] != (attachment_ids or []):
+                raise Problem('幂等键已被其他附件使用', 409)
             if session_speaks is not None and session_speaks!=json.loads(existing['session_speaks']):raise Problem('幂等键已被其他发言额度使用',409)
             prior_names=json.loads(existing['recipient_names']) if existing['recipient_names'] else recipients(existing['body'])
             if existing['body'] != body or existing['reply_to'] != reply_to or existing['delivery_mode']!=delivery_mode or existing['steer_task']!=steer_task or (cause is not None and existing['cause'] != cause) or names!=prior_names or (max_rounds is not None and max_rounds!=existing['max_rounds']) or (round_mode is not None and round_mode!=existing['round_mode']) or (session_rounds is not None and session_rounds!=json.loads(existing['session_rounds'])):
@@ -679,6 +687,11 @@ class Store:
         for reference in (parent,db.execute('SELECT * FROM messages WHERE id=?',(reply_to,)).fetchone() if reply_to else None):
             if reference and reference['private_to'] and reference['private_to']!=private_to:raise Problem('不能将 manager 私聊转发或引用到其他对话',403)
         target_names = [t['name'] for t in targets.values()]
+        if attachment_ids:
+            outdated = [m['name'] for m in targets.values() if m['kind']=='agent'
+                        and not m['paused'] and not m['departing'] and not m['uploads_supported']]
+            if outdated:
+                raise Problem('请先更新并重启这些 session 的 Bridge，再发送附件：'+', '.join(outdated), 409)
         steered=steering.validate(db,room,actor,list(targets.values()),body,steer_task) if delivery_mode=='steer' else None
         if actor['kind']=='user' and not private_to and steered is None and (current_sync:=synchronous.active(db,room_id)):
             if round_mode is None:mode='synchronous'
@@ -695,6 +708,8 @@ class Store:
             if actor['kind']=='user':cause=root
         message_id = db.execute('INSERT INTO messages(room,sender,body,targets,reply_to,cause,root,depth,nonce,created,max_rounds,runtime,recipient_names,round_mode,session_rounds,private_to) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
                                (room_id,sender,body,json.dumps(target_names),reply_to,cause,root,depth,nonce,time.time(),limit,json.dumps(meta),json.dumps(names),mode,json.dumps(limits),private_to)).lastrowid
+        if attachment_ids:
+            uploads.bind(db, room_id, sender, message_id, attachment_ids)
         db.execute('UPDATE messages SET sync_round=?,session_speaks=? WHERE id=?',(plan['round'],json.dumps(speaks),message_id))
         if steered is not None:
             db.execute('UPDATE messages SET delivery_mode=?,steer_task=? WHERE id=?',(delivery_mode,steer_task,message_id))

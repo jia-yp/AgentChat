@@ -20,6 +20,7 @@ function applyGuestPermissions(){
   document.querySelector('.roster-hint').textContent=creator?'点击成员查看详情和操作。':'点击自己的卡片修改名字和外观。';
   if(!creator&&state.view==='manage')showView('chat');
   $('send').disabled=!canSpeak()||!!state.sending;
+  renderComposerFiles();
 }
 function rememberInvitation(){
   const match=location.hash.match(/^#join\/([A-Za-z0-9_-]{32,128})$/);
@@ -61,6 +62,7 @@ async function saveGuestInvitation(rotate=false){
 }
 async function leaveUnavailableRoom(){
   state.room=null;state.snapshot=null;state.generation++;state.messages.clear();state.quote=null;state.channel='';state.channelDrafts.clear();
+  state.selectedFiles=[];state.pendingSend=null;renderComposerFiles();
   resetReading();closeMentions();$('messages').replaceChildren();$('members').replaceChildren();$('manage-agents').replaceChildren();
   $('history-results').replaceChildren();$('history-search-panel').hidden=true;$('history-preview').hidden=true;
   $('workspace').hidden=true;$('manage-page').hidden=true;$('empty').hidden=false;

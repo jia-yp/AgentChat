@@ -7,6 +7,9 @@ state.steering=new Set();
 state.recalling=new Set();
 state.permissionDrafts=new Map();
 state.sessionActions=new Set();
+state.selectedFiles=[];
+const maxFilesPerMessage=5;
+const maxFileBytes=10*1024*1024;
 const steerNames={pending:'待注入',injecting:'注入中',injected:'已注入当前任务',rejected:'无法注入',unknown:'注入结果未确认'};
 const statusNames = {dormant:'等待首次 @',idle:'待命',running:'正在工作',error:'需要处理',online:'在线',revoked:'已撤销'};
 const deliveryNames = {pending:'排队中',round_waiting:'等待下一轮',bundled:'合并到本轮任务',running:'执行中',done:'已完成',failed:'失败',skipped:'未触发',cancelled:'已取消'};
@@ -37,12 +40,32 @@ function choose(title,description,actions,input=false) {
 $('choice-input').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();$('choice-actions').querySelector('button')?.click();}});
 async function api(path, options={}) {
   const response = await fetch('/api'+path,{credentials:'same-origin',headers:{'Content-Type':'application/json'},...options});
-  const data=await response.json();
-  if(!response.ok){const error=new Error(data.error || (Array.isArray(data.detail)?data.detail.map(x=>x.msg).join('; '):'请求失败'));error.status=response.status;throw error;}
+  const data=await response.json().catch(error=>{if(response.ok)throw error;return {};});
+  if(!response.ok){const error=new Error(data.error || (Array.isArray(data.detail)?data.detail.map(x=>x.msg).join('; '):response.status===413?'请求超出服务器允许的大小':'请求失败'));error.status=response.status;throw error;}
   return data;
 }
 const post=(path,body={})=>api(path,{method:'POST',body:JSON.stringify(body)});
 function safely(fn) { return async event => { clearFeedback();try { await fn(event); } catch(error) {toast(error.message);} }; }
+
+function fileSize(bytes) {
+  if(bytes<1024)return `${bytes} B`;
+  if(bytes<1024*1024)return `${(bytes/1024).toFixed(1)} KiB`;
+  return `${(bytes/(1024*1024)).toFixed(1)} MiB`;
+}
+
+function renderComposerFiles() {
+  const list=$('composer-files'),disabled=!canSpeak()||!!state.sending;
+  $('attach-files').disabled=disabled;
+  list.hidden=!state.selectedFiles.length;
+  const html=state.selectedFiles.map(({file,id})=>`<li><span class="attachment-name" title="${esc(file.name)}">${esc(file.name)}</span><small>${fileSize(file.size)}</small><button class="text-button" type="button" data-remove-file="${id}" aria-label="移除 ${esc(file.name)}" ${disabled?'disabled':''}>×</button></li>`).join('');
+  if(list.dataset.content!==html){list.innerHTML=html;list.dataset.content=html;}
+}
+
+function attachmentLinks(message,room) {
+  if(!message.attachments?.length)return '';
+  const base=`/api/rooms/${encodeURIComponent(room)}/messages/${encodeURIComponent(message.id)}/attachments/`;
+  return `<ul class="message-attachments" aria-label="附件">${message.attachments.map(file=>`<li><a class="attachment-name" href="${base+encodeURIComponent(file.id)}" download="${esc(file.name)}">${esc(file.name)}</a><small>${fileSize(file.size)}</small></li>`).join('')}</ul>`;
+}
 function displayAuth() {
   const mode=!state.initialized?'bootstrap':state.registrationOpen&&location.hash==='#register'?'register':'login',register=mode==='register';
   state.authMode=mode;
@@ -89,6 +112,7 @@ async function selectRoom(id,view='chat',writeRoute=true) {
   state.room=id; state.generation++; state.messages.clear(); state.quote=null; state.pendingSend=null; state.snapshot=null;
   state.roundsDirty=false;state.templateSelected='';
   state.channel='';state.channelDrafts.clear();state.sessionRounds={};state.sessionSpeaks={};resetReading();
+  state.selectedFiles=[];renderComposerFiles();
   $('session-search').value='';$('session-filter').value='current';
   clearTimeout(roundSaveTimer);
   try {const saved=JSON.parse(localStorage.getItem(`agentchat-targets:${state.me.id}:${id}`));state.targets=new Set(Array.isArray(saved)&&saved.length?saved:['all']);}catch{state.targets=new Set(['all']);}
@@ -156,9 +180,11 @@ function selectedManager() {return state.snapshot?.members.find(m=>m.session_typ
 function switchChannel(channel) {
   if(channel===state.channel)return;
   closeMentions();
-  state.channelDrafts.set(state.channel,{text:$('message-input').value,quote:state.quote});
-  state.channel=channel;state.pendingSend=null;
-  const draft=state.channelDrafts.get(channel);$('message-input').value=draft?.text||'';window.AgentChatMobile?.fitInput();state.quote=null;$('quote-preview').hidden=true;
+  state.channelDrafts.set(state.channel,{text:$('message-input').value,quote:state.quote,files:state.selectedFiles,pendingSend:state.pendingSend});
+  state.channel=channel;
+  const draft=state.channelDrafts.get(channel);
+  state.selectedFiles=draft?.files||[];state.pendingSend=draft?.pendingSend||null;renderComposerFiles();
+  $('message-input').value=draft?.text||'';window.AgentChatMobile?.fitInput();state.quote=null;$('quote-preview').hidden=true;
 }
 
 function selectTarget(name,toggle=true) {
@@ -352,7 +378,7 @@ function messageNode(m,article=null) {
   article.querySelector('.sender-block strong').textContent=m.sender_name;
   if(m.sender_kind==='user'&&!m.private_to)article.querySelector('.kind').textContent=humanRole(state.snapshot?.members.find(member=>member.id===m.sender));
   paintAvatar(article.querySelector(':scope>.avatar'),state.snapshot?.members.find(member=>member.id===m.sender),{kind:m.sender_kind,harness:m.runtime?.harness,name:m.sender_name});
-  const body=article.querySelector('.message-body'),bodyHTML=m.recalled_at?'<span class="recalled-notice">消息已撤回 · 排队任务已取消</span>':`${m.quote?`<blockquote class="quote"><div class="quote-author">${esc(m.quote.name)} · ${formatTime(m.quote.created)}</div>${markdown(m.quote.body.slice(0,700))}</blockquote>`:''}${markdown(m.body)}`;
+  const body=article.querySelector('.message-body'),bodyHTML=m.recalled_at?'<span class="recalled-notice">消息已撤回 · 排队任务已取消</span>':`${m.quote?`<blockquote class="quote"><div class="quote-author">${esc(m.quote.name)} · ${formatTime(m.quote.created)}</div>${markdown(m.quote.body.slice(0,700))}${attachmentLinks(m.quote,m.room)}</blockquote>`:''}${markdown(m.body)}${attachmentLinks(m,m.room)}`;
   if(body.dataset.content!==bodyHTML){body.innerHTML=bodyHTML;body.dataset.content=bodyHTML;}
   article.classList.toggle('recalled-message',!!m.recalled_at);
   article.dataset.sender=m.sender;applyBubbleColor(article,m.recalled_at?'':memberBubbleColor(state.snapshot?.members.find(member=>member.id===m.sender)));
@@ -673,18 +699,58 @@ $('sync-panel').onclick=safely(async e=>{
   try {if(retry)await post(`/rooms/${room}/deliveries/${retry.dataset.syncRetry}/retry`);else await post(`/rooms/${room}/synchronous/continue`,{root:run.root,round:run.round});toast(retry?'已重试本轮任务':'已跳过失败，等待其他参与者完成后继续');}
   finally {state.syncBusy=false;if(state.room===room)await refresh();}
 });
+$('attach-files').onclick=()=>$('message-files').click();
+$('message-files').onchange=safely(event=>{
+  const picked=[...event.target.files];event.target.value='';
+  if(!picked.length||state.sending||!canSpeak())return;
+  if(state.selectedFiles.length+picked.length>maxFilesPerMessage)throw new Error('每条消息最多添加 5 个附件');
+  if(picked.some(file=>file.size>maxFileBytes))throw new Error('单个附件最多 10 MiB');
+  state.selectedFiles=[...state.selectedFiles,...picked.map(file=>({
+    file,id:Array.from(crypto.getRandomValues(new Uint8Array(16)),byte=>byte.toString(16).padStart(2,'0')).join(''),
+  }))];
+  renderComposerFiles();
+});
+$('composer-files').onclick=event=>{
+  const button=event.target.closest('[data-remove-file]');
+  if(!button||state.sending)return;
+  state.selectedFiles=state.selectedFiles.filter(item=>item.id!==button.dataset.removeFile);
+  renderComposerFiles();
+};
 $('composer').addEventListener('submit',safely(async e=>{
   closeMentions();
   e.preventDefault();if($('send').disabled)return;const room=state.room,channel=state.channel,text=$('message-input').value.trim(),reply_to=state.quote?.id||null,max_rounds=channel?0:roundLimit(),round_mode=channel?'global':$('round-mode').value,session_rounds=channel?{}:{...state.sessionRounds},session_speaks=channel?{}:{...state.sessionSpeaks},to=[...state.targets];
-  if(!text)throw new Error('请填写消息正文');
-  const body=to.map(n=>'@'+n).join(' ')+'\n'+text;
+  const files=state.selectedFiles;
+  if(!text&&!files.length)throw new Error('请填写消息正文或添加附件');
+  const body=to.map(n=>'@'+n).join(' ')+'\n'+(text||'请查看附件。');
   const payload={body,to,reply_to,max_rounds,round_mode,session_rounds,session_speaks};
+  if(files.length)payload.attachment_ids=files.map(item=>item.id);
   if(!state.pendingSend||JSON.stringify({...state.pendingSend,nonce:undefined})!==JSON.stringify(payload))state.pendingSend={...payload,nonce:crypto.randomUUID?crypto.randomUUID():`${Date.now()}-${Math.random()}`};
-  const pending=state.pendingSend;state.sending=true;$('send').disabled=true;
+  const pending=state.pendingSend;state.sending=true;$('send').disabled=true;renderComposerFiles();
   try {
+    if(files.length)$('send').textContent='上传中…';
+    for(const {file,id} of files){
+      await api(`/rooms/${room}/uploads/${id}`,{
+        method:'POST',headers:{'Content-Type':'application/octet-stream','X-AgentChat-Filename':encodeURIComponent(file.name)},body:file,
+      });
+    }
+    if(files.length)$('send').textContent='发送中…';
     await post(`/rooms/${room}/messages`,pending);
-    if(state.room===room&&state.channel===channel){if(state.pendingSend===pending)state.pendingSend=null;if($('message-input').value.trim()===text)$('message-input').value='';if(state.quote?.id===reply_to){state.quote=null;$('quote-preview').hidden=true;}await refresh();renderMessages(true);}
-  } finally {state.sending=false;$('send').disabled=!canSpeak();window.AgentChatMobile?.fitInput();}
+    if(state.room===room&&state.channel===channel){
+      if(state.pendingSend===pending)state.pendingSend=null;
+      if(state.selectedFiles===files)state.selectedFiles=[];
+      if($('message-input').value.trim()===text)$('message-input').value='';
+      if(state.quote?.id===reply_to){state.quote=null;$('quote-preview').hidden=true;}
+      await refresh();renderMessages(true);
+    }else if(state.room===room){
+      const draft=state.channelDrafts.get(channel);
+      if(draft?.pendingSend===pending){
+        draft.pendingSend=null;draft.files=[];
+        if(draft.text.trim()===text)draft.text='';
+      }
+    }
+  } finally {
+    state.sending=false;$('send').textContent='发送';$('send').disabled=!canSpeak();renderComposerFiles();window.AgentChatMobile?.fitInput();
+  }
 }));
 $('message-input').addEventListener('keydown',e=>{if(!e.defaultPrevented&&e.key==='Enter'&&!e.shiftKey&&!e.isComposing&&e.keyCode!==229){e.preventDefault();if(!e.repeat&&!$('send').disabled)$('composer').requestSubmit();}});
 $('max-rounds').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();e.target.blur();}});

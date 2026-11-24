@@ -1,5 +1,7 @@
 from fastapi.responses import JSONResponse
 
+from .uploads import is_upload_request
+
 
 class BodyLimit:
     """Bound bodies even for chunked requests sent directly to the API port."""
@@ -7,7 +9,8 @@ class BodyLimit:
         self.app,self.limit=app,limit
 
     async def __call__(self,scope,receive,send):
-        if scope['type']!='http' or scope['method'] in ('GET','HEAD','OPTIONS'):
+        if (scope['type']!='http' or scope['method'] in ('GET','HEAD','OPTIONS')
+                or is_upload_request(scope['method'], scope['path'])):
             return await self.app(scope,receive,send)
         chunks=[];size=0
         while True:

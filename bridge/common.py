@@ -25,12 +25,11 @@ class Client:
         self.token=token
         self.opener=urllib.request.build_opener(NoRedirect())
 
-    def call(self,path,data=None,timeout=20):
+    def _open(self,path,data=None,timeout=20):
         req=urllib.request.Request(self.url+path,data=json.dumps(data,ensure_ascii=False).encode() if data is not None else None,
             headers={'Authorization':'Bearer '+self.token,'Content-Type':'application/json','User-Agent':'AgentChat-Bridge/1'})
         try:
-            with self.opener.open(req,timeout=timeout) as response:
-                return json.load(response)
+            return self.opener.open(req,timeout=timeout)
         except urllib.error.HTTPError as exc:
             try:
                 payload=json.load(exc)
@@ -38,6 +37,14 @@ class Client:
             except (ValueError,TypeError):
                 message='HTTP '+str(exc.code)
             raise APIError(exc.code,message) from None
+
+    def call(self,path,data=None,timeout=20):
+        with self._open(path,data,timeout) as response:
+            return json.load(response)
+
+    def download(self,path,size,timeout=20):
+        with self._open(path,timeout=timeout) as response:
+            return response.read(size+1)
 
 
 def read_json(path):

@@ -6,6 +6,8 @@ No path here creates a new task or redirects a note to a later attempt.
 import secrets
 import time
 
+from . import uploads
+
 
 TABLE = '''
 CREATE TABLE {table}(
@@ -99,6 +101,8 @@ def offer(db, actor, message, delivery):
     from .core import Problem
     if delivery['status'] not in ('pending','round_waiting') or not can_convert(actor,message):return None
     target=dict(db.execute('SELECT * FROM members WHERE id=?',(delivery['member'],)).fetchone())
+    if not target['uploads_supported'] and uploads.metadata(db,message['id']):
+        return {'reason':'请先更新并重启目标 session 的 Bridge，再注入附件','task_ref':None}
     active=db.execute("SELECT id,attempts,message FROM deliveries WHERE member=? AND status='running' AND lease_until>=?",(target['id'],time.time())).fetchone()
     if not active:return {'reason':'目标目前没有正在运行的任务','task_ref':None}
     ref=active['id']+':'+str(active['attempts'])
@@ -130,6 +134,8 @@ def convert(store, actor, room_id, delivery_id, task_ref):
         root=db.execute('SELECT stopped FROM messages WHERE id=?',(message['root'] or message['id'],)).fetchone()
         if root['stopped']:raise Problem('这条消息所属协作已停止',409)
         target=store.member(db,queued['member'])
+        if not target['uploads_supported'] and uploads.metadata(db,message['id']):
+            raise Problem('请先更新并重启目标 session 的 Bridge，再注入附件',409)
         active=validate(db,room,actor,[target],message['body'],task_ref)
         # The same write transaction arbitrates against claim(). A converted
         # delivery is never left in the normal queue, even if injection fails.
@@ -148,11 +154,17 @@ def claim(store, actor, delivery_id, lease, nonce):
         # never returns notes already handed to another bridge invocation.
         db.execute("UPDATE steers SET status='injecting',claim_nonce=?,claimed=? WHERE delivery=? AND lease=? AND status='pending'",
                    (nonce,time.time(),delivery_id,d['lease']))
-        rows=db.execute("""SELECT s.id,m.id AS message,m.body,u.name AS sender,u.kind AS sender_kind
+        rows=db.execute("""SELECT s.id,m.id AS message,m.body,m.private_to,u.name AS sender,u.kind AS sender_kind
             FROM steers s JOIN messages m ON m.id=s.message JOIN members u ON u.id=m.sender
             WHERE s.delivery=? AND s.lease=? AND s.claim_nonce=? AND s.status='injecting' ORDER BY s.created""",
             (delivery_id,d['lease'],nonce)).fetchall()
-        return {'notes':[dict(r) for r in rows]}
+        notes=[]
+        for row in rows:
+            note=dict(row);private_to=note.pop('private_to')
+            if files:=uploads.metadata(db,note['message']):
+                note.update(attachments=files,private_to=private_to)
+            notes.append(note)
+        return {'notes':notes}
 
 
 def acknowledge(store, actor, delivery_id, lease, nonce, ids, status, error=''):

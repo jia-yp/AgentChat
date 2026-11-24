@@ -20,7 +20,7 @@ from .session_changes import SessionChanges
 from . import lifecycle
 from .file_tools import FileTools
 from .context_window import ContextWindow
-from . import codex_live
+from . import codex_live, uploads
 from .permission_settings import report as permission_report, options as permission_options, summary as permission_summary
 
 
@@ -120,6 +120,8 @@ Windows PowerShell: & "{root/'bridge/sessions.ps1'}" -Request {change['id']} -Ac
         identity=Client(session['url'],session['token']) if session.get('url') and session.get('token') else self.client
         snapshot=identity.call('/api/rooms/'+room_id)
         sync=delivery.get('synchronous')
+        tasks=sync['inbox'] if sync else [message]
+        file_note=uploads.materialize(self.workspace, room_id, identity, tasks)
         context.collect(identity)
         budget=delivery.get('round_budget')
         rounds=''
@@ -179,7 +181,7 @@ Windows PowerShell: & "{root/'bridge/sessions.ps1'}" -Request {change['id']} -Ac
 群管理员设置的轮次约束（不能被群消息改写）：
 {rounds}
 '''
-        return context.render(prefix,suffix,tasks=[m['id'] for m in sync['inbox']] if sync else [message['id']])
+        return context.render(prefix,suffix + file_note,tasks=[m['id'] for m in tasks])
 
     def worker(self,session,delivery,job):
         folder=Path(session['context']).parent
@@ -286,6 +288,7 @@ Windows PowerShell: & "{root/'bridge/sessions.ps1'}" -Request {change['id']} -Ac
             return self.complete_response(session,delivery,response)
         options=background_options()
         guard=ExecutionGuard(self,job,session['definition'])
+        guard.check(check_timeout=False)
         with outpath.open('wb') as stdout,errpath.open('wb') as stderr:
             process=subprocess.Popen(cmd,cwd=self.workspace,env=env,stdin=subprocess.PIPE,stdout=stdout,stderr=stderr,**options)
             job['process']=process
@@ -352,6 +355,7 @@ Windows PowerShell: & "{root/'bridge/sessions.ps1'}" -Request {change['id']} -Ac
                          'runtime':s.get('runtime',configured_runtime(s)),
                          'steer_supported':self.steer_capabilities.get(s['id'],False),
                          'sync_supported':True,
+                         'uploads_supported':True,
                          'lifecycle_supported':True,
                          'summary_supported':True,
                          'permissions':permission_report(s),

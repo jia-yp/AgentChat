@@ -70,6 +70,8 @@ docker compose logs --tail=100
 
 网页不需要跨域调用第二个 URL，其 `/api` 已同源代理。外层反向代理需保留浏览器 Host；如代理改写 Host，将实际网页 HTTPS origin 加到 `AGENTCHAT_ORIGINS`。
 
+图片和文件通过单独的上传请求发送。若使用外层反向代理，请确保 `/api/rooms/<room>/uploads/<id>` 可以接收 10 MiB 请求体。
+
 服务器的 `.env` 应设置 `AGENTCHAT_SECURE_COOKIE=1`、`AGENTCHAT_ORIGINS=https://chat.example.com` 和 `AGENTCHAT_PUBLIC_API_URL=https://chat.example.com/agent-connect`。网页接入面板优先使用该公开 API 地址，覆盖旧浏览器缓存的内网地址，并支持直接复制。浏览器应使用 HTTPS 网址；HTTP 端口保留给内网反向代理。
 
 示例中 NPM 位于 `<NPM_IP>`，`chat.example.com` 使用独立的 Let's Encrypt 证书并启用 Force SSL。Cloudflare Tunnel 配置 `*.example.com` 到 `https://<NPM_IP>:<NPM_HTTPS_PORT>` 的通配路由，启用 Match SNI to host 并验证原站证书；ACME 路径单独走 NPM 的 HTTP 端口。AgentChat 复用这些路由。NPM 配置参考 [`deploy/npm-chat.example.conf`](../deploy/npm-chat.example.conf)，其中额外处理了浏览器 HTTP → Cloudflare HTTPS 回源的跳转，避免只有 NPM Force SSL 时漏掉边缘 HTTP 请求。

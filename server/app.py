@@ -12,16 +12,17 @@ import sqlite3
 import threading
 import time
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 from fastapi import FastAPI, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse,Response,PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .core import Store, Problem, digest, password_hash, password_ok, token, valid_name, valid_model, valid_runtime, manages_member, LEASE_SECONDS
 from .limits import BodyLimit
-from . import permissions, synchronous, reading, session_changes, guests, workspaces, lifecycle, manager
+from . import permissions, synchronous, reading, session_changes, guests, workspaces, lifecycle, manager, uploads
 
 
 class Login(BaseModel):
@@ -180,6 +181,7 @@ class MessageInput(BaseModel):
     session_speaks: dict[str,int] | None = None
     delivery_mode: str = 'normal'
     steer_task: str = Field(default='',max_length=120)
+    attachment_ids: list[str] | None = Field(default=None, max_length=uploads.MAX_FILES)
 
 
 class SteerClaimInput(BaseModel):
@@ -306,8 +308,10 @@ def create_app(data_dir=None):
     @app.middleware('http')
     async def security(request, call_next):
         if request.method not in ('GET','HEAD','OPTIONS'):
-            if request.headers.get('content-type','').split(';')[0]!='application/json':
-                return JSONResponse({'error':'请求必须使用 application/json'},415)
+            content_type = ('application/octet-stream' if uploads.is_upload_request(request.method, request.url.path)
+                            else 'application/json')
+            if request.headers.get('content-type','').split(';')[0] != content_type:
+                return JSONResponse({'error':'请求必须使用 '+content_type},415)
             origin = request.headers.get('origin')
             if origin:
                 allowed = {x.strip().rstrip('/') for x in os.environ.get('AGENTCHAT_ORIGINS','').split(',') if x.strip()}
@@ -615,6 +619,21 @@ def create_app(data_dir=None):
     def send(room_id:str,data:MessageInput,request:Request):
         return store.post(room_id,actor(request),**data.model_dump())
 
+    @app.post('/api/rooms/{room_id}/uploads/{upload_id}')
+    async def upload(room_id:str,upload_id:str,request:Request):
+        if not uploads.is_upload_request(request.method, request.url.path):
+            raise Problem('无效的附件编号', 400)
+        a = await run_in_threadpool(actor, request)
+        await run_in_threadpool(uploads.check_access, store, room_id, a)
+        name, content = await uploads.read_upload(request)
+        return await run_in_threadpool(uploads.save, store, room_id, a, upload_id, name, content)
+
+    @app.get('/api/rooms/{room_id}/messages/{message_id}/attachments/{upload_id}')
+    def attachment(room_id:str,message_id:int,upload_id:str,request:Request):
+        name, content = uploads.download(store, actor(request), room_id, message_id, upload_id)
+        return Response(content, media_type='application/octet-stream',
+                        headers={'Content-Disposition': "attachment; filename*=UTF-8''" + quote(name, safe='')})
+
     @app.post('/api/rooms/{room_id}/control')
     def room_control(room_id:str,data:ControlInput,request:Request):
         a=user(request)
@@ -753,6 +772,7 @@ def create_app(data_dir=None):
                 db.execute('UPDATE members SET summary_supported=? WHERE id=?',(int(item.get('summary_supported') is True),mid))
                 permissions.heartbeat(db,dict(member),item)
                 db.execute('UPDATE members SET sync_supported=? WHERE id=?',(int(item.get('sync_supported') is True),mid))
+                db.execute('UPDATE members SET uploads_supported=? WHERE id=?',(int(item.get('uploads_supported') is True),mid))
                 db.execute('UPDATE members SET steer_supported=? WHERE id=?',(int(item.get('steer_supported') is True and member['harness']=='codex'),mid))
                 if 'runtime' in item:
                     db.execute('UPDATE members SET runtime=? WHERE id=?',(json.dumps(valid_runtime(item['runtime'],member['harness'])),mid))
