@@ -26,12 +26,17 @@ def is_upload_request(method, path):
 
 def sender_for(store, db, room, actor):
     from .core import Problem
-    if actor['kind'] != 'user':
-        raise Problem('只有群聊用户可以上传附件', 403)
-    store.access(db, room, actor, manage=False)
-    if actor['_room_role'] == 'observer':
-        raise Problem('观察者只能阅读', 403)
-    return actor['id'] + ':' + room
+    if actor['kind'] not in ('user', 'agent'):
+        raise Problem('只有群聊用户和 agent 可以上传附件', 403)
+    room_row = store.access(db, room, actor, manage=False)
+    if actor['kind'] == 'user':
+        if actor['_room_role'] == 'observer':
+            raise Problem('观察者只能阅读', 403)
+        return actor['id'] + ':' + room
+    session = store.member(db, actor['id'])
+    if not session['enabled'] or session['paused'] or room_row['paused']:
+        raise Problem('此 session 尚未启用或已暂停', 403)
+    return actor['id']
 
 
 def check_access(store, room, actor):

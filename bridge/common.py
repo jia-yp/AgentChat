@@ -5,6 +5,7 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+from urllib.parse import quote
 
 
 class APIError(Exception):
@@ -25,9 +26,10 @@ class Client:
         self.token=token
         self.opener=urllib.request.build_opener(NoRedirect())
 
-    def _open(self,path,data=None,timeout=20):
-        req=urllib.request.Request(self.url+path,data=json.dumps(data,ensure_ascii=False).encode() if data is not None else None,
-            headers={'Authorization':'Bearer '+self.token,'Content-Type':'application/json','User-Agent':'AgentChat-Bridge/1'})
+    def _open(self,path,data=None,timeout=20,*,headers=None):
+        req=urllib.request.Request(self.url+path,data=data,
+            headers={'Authorization':'Bearer '+self.token,'Content-Type':'application/json','User-Agent':'AgentChat-Bridge/1',
+                     **(headers or {})})
         try:
             return self.opener.open(req,timeout=timeout)
         except urllib.error.HTTPError as exc:
@@ -39,7 +41,13 @@ class Client:
             raise APIError(exc.code,message) from None
 
     def call(self,path,data=None,timeout=20):
-        with self._open(path,data,timeout) as response:
+        content=json.dumps(data,ensure_ascii=False).encode() if data is not None else None
+        with self._open(path,content,timeout) as response:
+            return json.load(response)
+
+    def upload(self,path,name,content,timeout=20):
+        headers={'Content-Type':'application/octet-stream','X-AgentChat-Filename':quote(name,safe='')}
+        with self._open(path,content,timeout,headers=headers) as response:
             return json.load(response)
 
     def download(self,path,size,timeout=20):

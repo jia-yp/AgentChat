@@ -82,6 +82,32 @@ def test_upload_checks_request_size_name_and_origin(system):
     assert upload(client, room, 'empty.txt', b'').status_code == 200
 
 
+def test_agent_can_send_its_own_upload_only_in_its_room(system):
+    client, room, _, bridge_headers, agents, _ = system
+    sender, peer = agents[:2]
+    agent_headers = {'Authorization': 'Bearer ' + sender['token']}
+    peer_headers = {'Authorization': 'Bearer ' + peer['token']}
+    assert upload(client, room, 'file.bin', b'file', headers=bridge_headers).status_code == 403
+    assert upload(client, room, 'file.bin', b'file', headers=agent_headers).status_code == 403
+    send(client, room, '@claude1 @codex1 准备报告').raise_for_status()
+    delivery = claim(client, bridge_headers, sender)
+    other_room = client.post('/api/rooms', json={'name': 'Other'}).json()
+    assert upload(client, other_room, 'file.bin', b'file', headers=agent_headers).status_code == 403
+
+    data = b'\x00report\r\n'
+    upload_id = upload(client, room, '报告.bin', data, headers=agent_headers).json()['id']
+    assert upload(client, room, '报告.bin', data, upload_id=upload_id, headers=peer_headers).status_code == 409
+    assert send(client, room, '@admin 附件', attachment_ids=[upload_id]).status_code == 409
+    assert send(client, room, '@admin 附件', peer_headers, attachment_ids=[upload_id]).status_code == 409
+    options = {'attachment_ids': [upload_id], 'cause': delivery['message']['id'], 'nonce': 'send-report'}
+    sent = send(client, room, '@admin 附件', agent_headers, **options)
+    sent.raise_for_status()
+    message = sent.json()
+    assert message['sender_kind'] == 'agent' and message['sender'] == sender['id']
+    assert client.get(path(room, message, upload_id)).content == data
+    assert send(client, room, '@admin 附件', agent_headers, **options).json()['id'] == message['id']
+
+
 def test_private_attachment_uses_message_and_room_access(system):
     client, room, _, bridge_headers, agents, _ = system
     response = client.post('/api/bridge/sessions', headers=bridge_headers, json={
@@ -99,6 +125,14 @@ def test_private_attachment_uses_message_and_room_access(system):
     assert send(client, room, '@claude1 转发', reply_to=message['id']).status_code == 403
     other_room = client.post('/api/rooms', json={'name': 'Other room'}).json()
     assert client.get(path(other_room, message, upload_id)).status_code == 404
+
+    active = claim(client, bridge_headers, manager)
+    report_id = upload(client, room, 'report.txt', b'private response', headers=manager_headers).json()['id']
+    result = send(client, room, '@admin 管理报告', manager_headers, cause=active['message']['id'], attachment_ids=[report_id])
+    result.raise_for_status()
+    download_url = path(room, result.json(), report_id)
+    assert client.get(download_url).content == b'private response'
+    assert client.get(download_url, headers=worker_headers).status_code == 404
 
 
 def test_steer_claim_carries_attachments(system):
@@ -123,7 +157,7 @@ def test_steer_claim_carries_attachments(system):
     }).content == b'extra'
 
 
-def test_harness_reads_uploads_in_each_workspace(tmp_path):
+def test_harnesses_exchange_files_with_humans_and_another_workspace(tmp_path):
     with socket.socket() as listener:
         listener.bind(('127.0.0.1', 0))
         port = listener.getsockname()[1]
@@ -144,13 +178,24 @@ def test_harness_reads_uploads_in_each_workspace(tmp_path):
             harness.write_text('''import hashlib, json, sys
 from pathlib import Path
 prompt = sys.stdin.read()
-assert '用户上传了' in prompt
+assert '聊天消息中包含以下附件' in prompt
 files = json.loads(next(line for line in prompt.splitlines() if line.startswith('[{"消息":')))
 result = {}
 for file in files:
     path = Path(file['本地路径'])
     assert path.resolve().is_relative_to(Path.cwd().resolve())
     result[file['文件名']] = hashlib.sha256(path.read_bytes()).hexdigest()
+if Path.cwd().name == 'first':
+    assert all(file['发送者'] == 'tester' for file in files)
+    report = Path('成果.bin')
+    report.write_bytes(bytes(range(256)))
+    instructions = next(line for line in prompt.splitlines() if line.startswith('请求目录：'))
+    requests = Path(instructions.split('；', 1)[0].removeprefix('请求目录：'))
+    (requests / 'send-report.json').write_text(json.dumps({'tool': 'send', 'arguments': {
+        'body': '@second @tester 附上成果', 'nonce': 'share-report', 'files': [report.name],
+    }}), encoding='utf-8')
+elif '成果.bin' in result:
+    assert len(files) == 1 and files[0]['发送者'] == 'first'
 print(json.dumps({'response': '@tester '+json.dumps(result, ensure_ascii=False)}, ensure_ascii=False))
 ''', encoding='utf-8')
             bridges = []
@@ -183,11 +228,28 @@ print(json.dumps({'response': '@tester '+json.dumps(result, ensure_ascii=False)}
                 assert {name: (folder / f'{upload_id}-{name}').read_bytes()
                         for upload_id, name in zip(ids, files)} == files
 
-            history = client.get(f'/api/rooms/{room["id"]}/messages').json()
+            history_url = f'/api/rooms/{room["id"]}/messages'
+            history = client.get(history_url).json()
             assert [d['status'] for d in history[0]['deliveries']] == ['done', 'done']
-            observed = [json.loads(m['body'].split(' ', 1)[1]) for m in history[1:]]
+            artifact = next(message for message in history[1:] if message.get('attachments'))
+            assert artifact['sender_name'] == 'first' and artifact['targets'] == ['second', 'tester']
+            report = artifact['attachments'][0]
+            report_bytes = bytes(range(256))
+            assert report['name'] == '成果.bin'
+            assert client.get(path(room, artifact, report['id'])).content == report_bytes
+            observed = [json.loads(m['body'].split(' ', 1)[1]) for m in history[1:] if m['id'] != artifact['id']]
             expected = {name: hashlib.sha256(data).hexdigest() for name, data in files.items()}
             assert observed == [expected, expected]
+
+            receiver = bridges[1]
+            session = next(iter(receiver.sessions.values()))
+            delivery = receiver.client.call(f'/api/bridge/sessions/{session["id"]}/claim', {})['delivery']
+            assert delivery['message']['id'] == artifact['id']
+            receiver.worker(session, delivery, {'delivery': delivery, 'cancel': threading.Event()})
+            received_path = receiver.workspace / '.agentchat' / 'rooms' / room['id'] / 'uploads' / f'{report["id"]}-成果.bin'
+            assert received_path.read_bytes() == report_bytes
+            history = client.get(history_url).json()
+            assert json.loads(history[-1]['body'].split(' ', 1)[1]) == {'成果.bin': report['sha256']}
     finally:
         server.terminate()
         try:

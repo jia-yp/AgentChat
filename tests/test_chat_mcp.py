@@ -3,8 +3,11 @@ import os
 import subprocess
 import sys
 
+import pytest
+
 from bridge.chat_mcp import handle, call_tool
 from bridge.common import write_json
+from bridge.uploads import MAX_FILE_BYTES
 
 
 def test_chat_mcp_only_routes_scoped_calls_and_current_cause(monkeypatch):
@@ -44,3 +47,75 @@ def test_mcp_tool_errors_do_not_expose_session_token():
         def call(self,path):raise RuntimeError('error containing mysecret')
     response=handle({'id':1,'method':'tools/call','params':{'name':'members'}},{'room_id':'room','token':'mysecret'},Client())
     assert response['result']['isError'] and 'mysecret' not in json.dumps(response)
+
+
+def test_send_files_reuses_upload_ids_on_retry(tmp_path):
+    report = tmp_path / '成果.bin'
+    report.write_bytes(b'\x00data\r\n')
+    scratch = tmp_path / '.agentchat' / 'rooms' / 'room' / 'sessions' / 'sender' / 'temp'
+    scratch.mkdir(parents=True)
+    empty = scratch / 'empty.txt'
+    empty.touch()
+    context = {'workspace': str(tmp_path), 'temp_dir': str(scratch), 'room_id': 'room',
+               'token': 'secret', '_task_cause': 7}
+    uploads, messages = [], []
+
+    class Client:
+        def upload(self, path, name, data):
+            uploads.append((path, name, data))
+
+        def call(self, path, data):
+            messages.append((path, data))
+            return {'id': 9}
+
+    args = {'body': '@admin 成果', 'nonce': 'finish-report', 'files': [report.name, str(empty)]}
+    client = Client()
+    for _ in range(2):
+        assert call_tool(context, client, 'send', args) == {'id': 9}
+    assert uploads[:2] == uploads[2:]
+    assert [item[1:] for item in uploads[:2]] == [(report.name, report.read_bytes()), (empty.name, b'')]
+    assert messages[0] == messages[1]
+    assert messages[0][1]['attachment_ids'] == [item[0].rsplit('/', 1)[1] for item in uploads[:2]]
+    assert messages[0][1]['cause'] == 7
+
+
+def test_send_rejects_files_outside_workspace_or_in_private_state_before_uploading(tmp_path):
+    workspace = tmp_path / 'project'
+    workspace.mkdir()
+    share = workspace / 'share.txt'
+    share.touch()
+    outside = tmp_path / 'outside.txt'
+    outside.touch()
+    paths = [outside, workspace, workspace / 'missing.bin']
+    for relative in ('.agentchat/rooms/room/sessions/other/session.json',
+                     '.agentchat/rooms/room/uploads/private/manager/private.txt',
+                     '.agentchat/rooms/another/uploads/download.txt'):
+        path = workspace / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
+        paths.append(path)
+    huge = workspace / 'huge.bin'
+    with huge.open('wb') as stream:
+        stream.truncate(MAX_FILE_BYTES + 1)
+    paths.append(huge)
+
+    context = {'workspace': str(workspace), 'room_id': 'room', 'token': 'secret'}
+    for path in paths:
+        with pytest.raises(ValueError):
+            call_tool(context, None, 'send', {'body': '@admin file', 'nonce': 'same',
+                                               'files': [share.name, str(path)]})
+
+
+def test_send_rejects_a_symlink_outside_workspace(tmp_path):
+    workspace = tmp_path / 'project'
+    workspace.mkdir()
+    outside = tmp_path / 'outside.txt'
+    outside.touch()
+    link = workspace / 'link.txt'
+    try:
+        link.symlink_to(outside)
+    except OSError:
+        pytest.skip('symlink creation unavailable on this host')
+    context = {'workspace': str(workspace), 'room_id': 'room', 'token': 'secret'}
+    with pytest.raises(ValueError, match='workspace'):
+        call_tool(context, None, 'send', {'body': '@admin file', 'nonce': 'same', 'files': [link.name]})

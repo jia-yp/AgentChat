@@ -135,7 +135,7 @@ Windows PowerShell: & "{root/'bridge/sessions.ps1'}" -Request {change['id']} -Ac
                 rounds+='\n同一轮收到的多条点名已合并为下方收件箱；请一起处理，只执行这一次任务。最终回复表示本轮完成，允许提前结束，不要凑满额度。若已经用 send 发满额度，请立即收尾，最终回复不会再重复发布。'
                 rounds+='\n本轮普通 @ 只在下一轮触发。其他参与者本轮的普通发言暂不可见，历史接口也固定在本轮开始时的截止点；不要轮询等待同伴。系统会在所有参与者完成后统一推进。Steer 是针对正在运行任务的即时补充例外，不另开轮次。'
             if budget['last']:
-                rounds+='\n【最后一轮，必须收尾】不再继续工作，不执行新的工具操作，不再分派或请求下一轮。请基于已有信息，做出这一轮对话最后的决定与总结，说明完成内容、结论及尚未解决事项，直接 @管理员 汇报。'
+                rounds+='\n【最后一轮，必须收尾】不再继续工作，也不再分派或请求下一轮。请基于已有信息做出最后的决定与总结，直接 @管理员 汇报。可以用 send 附上已完成的成果。除发送这份汇报外，不执行新的工具操作。'
                 rounds+=('你不再接收这一轮任务；其他 session 按各自剩余额度继续。' if budget.get('mode')=='individual' else '服务端不会继续触发任何下一轮任务。')
         manager=''
         root=Path(__file__).resolve().parent.parent
@@ -170,6 +170,7 @@ Windows PowerShell: & "{root/'bridge/sessions.ps1'}" -Request {change['id']} -Ac
 - 可用环境变量 AGENTCHAT_CONTEXT 对应的本地 CLI 读取全部历史或主动发送消息；只使用自己的身份凭证，不读取或输出其他 session/bridge 的 token。
 - 普通消息会排队。需要在对方当前工作中纠偏时，可选择 Steer：先用 members 读取目标最新 active_task.ref，确认其 steer_supported，然后 send --mode steer --task <ref> --text "@目标 补充信息"。只能指定一个正在工作的 agent，不广播、不自动改投下一项任务。每个任务最多 8 条、合计 16000 字，每条最多 4000 字，至少间隔 2 秒。
 - 有专用 AgentChat MCP 工具时优先使用；Claude 的工具名为 mcp__agentchat__members / history / send。没有暴露这些工具时，使用上方群聊请求文件，不要猜测不存在的工具或更改系统权限。send 的参数为 body、nonce、mode（normal 或 steer），Steer 还需 task（active_task.ref）。工具仅使用你自己的身份。
+- 要把图片或成果文件发给群成员，在 send 中传 files 路径列表，或在 CLI 中为每个文件加 --attach。只发送当前任务需要的文件，单条最多 5 个，每个最多 10 MiB。正文以 @收件人 开头。发送成功后，用户能在聊天里下载，接到任务的 Agent 会收到本地副本。
 - Windows 没有 MCP 时优先使用 & "{Path(__file__).parent/'chat.ps1'}" -Action members，或 -Action send -Text "@目标 内容" -Nonce <稳定编号>；Steer 再加 -Mode steer -Task <ref>。其他系统的 CLI 为 "{sys.executable}" "{Path(__file__).resolve().parents[1]/'agentchat.py'}"。不要使用 Windows PATH 中的 python 应用别名，不要放宽系统脚本策略；工具不可用时报告具体错误。已注入仅表示 harness 接受输入，不能声称对方已经理解。
 - 如需要人工澄清或权限，在群聊 @管理员 提出，不要等待本地交互弹窗。
 - 最终回复是一条要发到群聊的消息，必须用 @目标 开头。默认回复 @{message['sender_name']}。只写对群成员有用的结果。

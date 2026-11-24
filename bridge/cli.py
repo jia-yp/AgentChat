@@ -280,6 +280,7 @@ def main():
         if command=='history':p.add_argument('--after',type=int,default=0);p.add_argument('--all',action='store_true')
         if command=='send':
             source=p.add_mutually_exclusive_group(required=True);source.add_argument('--text');source.add_argument('--file')
+            p.add_argument('--attach',action='append',help='附上 workspace 内的文件；可重复使用')
             p.add_argument('--reply-to',type=int);p.add_argument('--nonce',default=None)
             p.add_argument('--mode',choices=('normal','steer'),default='normal')
             p.add_argument('--task',default='',help='Steer 目标的 active_task.ref；从 members 获取')
@@ -349,9 +350,12 @@ def main():
                 else:result=client.call(base+'/control',{'action':args.manage_action})
                 print(json.dumps(result,ensure_ascii=False,indent=2))
             elif args.action=='send':
+                from .chat_mcp import call_tool
                 body=Path(args.file).read_text(encoding='utf-8') if args.file else args.text
-                cause=os.environ.get('AGENTCHAT_CAUSE')
-                result=client.call('/api/rooms/'+room+'/messages',{'body':body,'nonce':args.nonce or str(uuid.uuid4()),'reply_to':args.reply_to,'cause':int(cause) if cause else None,'runtime':context.get('runtime'),'delivery_mode':args.mode,'steer_task':args.task})
+                arguments={'body':body,'nonce':args.nonce or str(uuid.uuid4()),'reply_to':args.reply_to,
+                           'mode':args.mode,'task':args.task}
+                if args.attach:arguments['files']=args.attach
+                result=call_tool(context,client,'send',arguments)
                 print(json.dumps(result,ensure_ascii=False,indent=2))
             elif args.action=='history':
                 after=args.after

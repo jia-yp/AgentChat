@@ -28,6 +28,7 @@ class FileTools:
         return f'''若没有可用的群聊 MCP/CLI，可以直接用文件编辑工具提交 {tools}，无需 shell 或额外权限。
 请求目录：{folder/'requests'}；结果目录：{folder/'receipts'}。
 每个操作写一个新的英文文件名 .json，例如 note-1.json，内容为 {{"tool":"send","arguments":{{"body":"@目标 内容","nonce":"本次操作的稳定编号"}}}}。members 的 arguments 是空对象；history 可传 before/limit。manager 的 sessions 参数与专用工具相同。
+发送附件时，在 send 的 arguments 中加 "files":["reports/成果.pdf"]。相对路径以共享项目根目录为基准。
 gateway 只以你自己的身份执行本次任务中的请求；同名文件不可修改或复用。读取结果目录的同名 JSON，ok=true 才表示成功；需要结果时稍后再读，不循环等待或重复发送。最终回复照常直接输出，不要同时用文件发送同一条最终回复。'''
 
     def __init__(self,session,delivery,cancel,client=None):

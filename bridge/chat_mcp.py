@@ -1,13 +1,14 @@
 """Small stdio MCP facade exposing only this session's existing chat rights.
 
-No configurable URL, credential, file or shell is exposed. Managers additionally
-receive a workspace-scoped session lifecycle tool, enforced by the server.
+The session identity and API URL are fixed. Sending attachments accesses workspace
+files only. Managers additionally receive a server-enforced session lifecycle tool.
 """
 import json
 import os
 import sys
 
 from .common import Client, read_json
+from .uploads import MAX_FILES, stage_workspace_files
 
 
 TOOLS=[
@@ -15,9 +16,11 @@ TOOLS=[
      'inputSchema':{'type':'object','properties':{},'additionalProperties':False},'annotations':{'readOnlyHint':True}},
     {'name':'history','description':'Read visible AgentChat history and delivery receipts. In synchronous mode history is frozen at the current round cutoff, except your own messages and Steer notes addressed to you. Do not poll waiting for current-round peers. Private manager messages remain scoped by the server.',
      'inputSchema':{'type':'object','properties':{'before':{'type':'integer','minimum':1},'limit':{'type':'integer','minimum':1,'maximum':100}},'additionalProperties':False},'annotations':{'readOnlyHint':True}},
-    {'name':'send','description':'Send a message to another agent using your current AgentChat identity. In synchronous mode normal messages consume your formal-message allowance shared with the final response, and @ mentions queue for the NEXT round; reserve a final-response slot or finish immediately when slots are exhausted. For a correction, warning, review note or clarification about a peer\'s CURRENT running task, prefer mode=steer with its fresh active_task.ref from members. You choose the mode yourself; no human UI switch is needed. Steer does not consume formal-message slots and targets ONE supported running task. Never silently retarget or resend an unknown injection. Prefix body with @recipient and use a stable nonce for HTTP retries.',
+    {'name':'send','description':'Send a message to a human or peer using your current AgentChat identity. Prefix body with @recipient. Set files to attach up to 5 workspace files, each up to 10 MiB. Attach only files needed by the current task. The web chat shows downloadable files, and a tasked agent receives local copies. In synchronous mode normal messages consume your formal-message allowance shared with the final response, and @ mentions queue for the NEXT round; finish immediately when slots are exhausted. For a correction, warning, review note or clarification about a peer\'s CURRENT running task, prefer mode=steer with its fresh active_task.ref from members. Steer does not consume formal-message slots and targets ONE supported running task. Never silently retarget or resend an unknown injection. Reuse the nonce and file contents for HTTP retries.',
      'inputSchema':{'type':'object','properties':{'body':{'type':'string','minLength':1,'maxLength':24000},'nonce':{'type':'string','minLength':1,'maxLength':120},
          'mode':{'type':'string','enum':['normal','steer'],'default':'normal'},'task':{'type':'string','description':'Required for steer: exact active_task.ref from members'},
+         'files':{'type':'array','items':{'type':'string','minLength':1},'minItems':1,'maxItems':MAX_FILES,
+                  'description':'Local file paths, absolute or relative to the current workspace'},
          'reply_to':{'type':'integer','minimum':1}},'required':['body','nonce'],'additionalProperties':False},
      'annotations':{'readOnlyHint':False,'destructiveHint':False,'idempotentHint':True}},
 ]
@@ -48,11 +51,16 @@ def call_tool(context, client, name, args):
         if type(before)!=int or before<1 or type(limit)!=int or not 1<=limit<=100:raise ValueError('Invalid history range')
         return client.call(f'{base}/messages?before={before}&limit={limit}')
     if name=='send':
-        if set(args)-{'body','nonce','mode','task','reply_to'}:raise ValueError('Unknown send argument')
-        if not isinstance(args.get('body'),str) or not isinstance(args.get('nonce'),str) or not args['nonce']:raise ValueError('body and stable nonce are required')
+        if set(args)-{'body','nonce','mode','task','reply_to','files'}:raise ValueError('Unknown send argument')
+        body,nonce=args.get('body'),args.get('nonce')
+        if not isinstance(body,str) or not 1<=len(body)<=24000 or not isinstance(nonce,str) or not 1<=len(nonce)<=120:
+            raise ValueError('body and stable nonce are required')
         cause=context.get('_task_cause',os.environ.get('AGENTCHAT_CAUSE'))
-        return client.call(base+'/messages',{'body':args['body'],'nonce':args['nonce'],'delivery_mode':args.get('mode','normal'),
-            'steer_task':args.get('task',''),'reply_to':args.get('reply_to'),'cause':int(cause) if cause else None,'runtime':context.get('runtime')})
+        payload={'body':body,'nonce':nonce,'delivery_mode':args.get('mode','normal'),
+            'steer_task':args.get('task',''),'reply_to':args.get('reply_to'),'cause':int(cause) if cause else None,'runtime':context.get('runtime')}
+        if 'files' in args:
+            payload['attachment_ids']=stage_workspace_files(context,client,nonce,args['files'])
+        return client.call(base+'/messages',payload)
     raise ValueError('Unknown chat tool')
 
 

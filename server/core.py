@@ -606,7 +606,7 @@ class Store:
     def post_in(self, db, room_id, actor, body, nonce, reply_to=None, cause=None, to=None, max_rounds=None, runtime=None, round_mode=None, session_rounds=None, delivery_mode='normal', steer_task='', session_speaks=None, _summary=False, _recovery=False, attachment_ids=None):
         room = self.access(db, room_id, actor,manage=False)
         if actor['kind']=='user' and actor['_room_role']=='observer':raise Problem('观察者只能阅读；请联系创建者调整为参与者',403)
-        if attachment_ids and actor['kind']!='user':raise Problem('只有群聊用户可以发送附件',403)
+        if attachment_ids and actor['kind'] not in ('user','agent'):raise Problem('只有群聊用户和 agent 可以发送附件',403)
         synchronous.settle(db,room_id)
         steering.settle(db)
         if delivery_mode not in ('normal','steer'):raise Problem('未知的消息投递模式')

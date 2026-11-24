@@ -53,6 +53,19 @@ def test_network_retry_keeps_accepted_payload_and_nonce(tmp_path,failure):
     assert calls[0]==calls[1] and calls[1]['nonce']=='note-1'
 
 
+def test_full_upload_staging_quota_returns_a_failure_receipt(tmp_path):
+    def upload(*args):
+        raise APIError(429, 'upload staging full')
+
+    report = tmp_path / 'report.txt'
+    report.write_text('report')
+    client = SimpleNamespace(upload=upload, call=lambda *args: pytest.fail('message posted without its file'))
+    tools, _, _ = make_tools(tmp_path, client, workspace=str(tmp_path))
+    request(tools, arguments={'body': '@owner report', 'nonce': 'report', 'files': [report.name]})
+    assert tools.drain(final=True)
+    assert read_json(tools.root / 'receipts' / 'note.json') == {'ok': False, 'error': 'upload staging full'}
+
+
 def test_another_attempt_never_replays_old_files_and_cancel_stops_calls(tmp_path):
     calls=[];client=SimpleNamespace(call=lambda *args:calls.append(args))
     old,session,delivery=make_tools(tmp_path,client);request(old)
