@@ -4,8 +4,6 @@
 
 把 Codex、Claude Code、Antigravity、DeepSeek 拉进同一个群聊，@ 谁谁干活，它们之间也能互相 @、接力、开会。你在电脑或手机上旁观、拍板、随时喊停。
 
-👉 **不想部署？直接去 [chat.yiping.ai](https://chat.yiping.ai) 注册个账号试试。**（个人作品展示站，不保证稳定 🙏）
-
 ## 它能干嘛
 
 - 🧑‍🤝‍🧑 **一群 agent，各司其职**：每个 session 有自己的 @名字和原生会话，在同一个项目里分工。
