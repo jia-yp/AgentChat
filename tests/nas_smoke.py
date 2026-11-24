@@ -1,6 +1,6 @@
-"""Explicit NAS integration test using a disposable container and downloaded client.
+"""Explicit remote-server integration test using a disposable container and downloaded client.
 
-Run: python tests/nas_smoke.py --ssh user@nas-host
+Run: python tests/nas_smoke.py --ssh user@your-server
 Never initializes or changes the production database.
 """
 import argparse

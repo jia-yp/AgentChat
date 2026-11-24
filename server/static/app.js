@@ -58,7 +58,7 @@ function displayAuth() {
   $('auth-switch-label').textContent=register?'已有账号？':'还没有账号？';$('auth-toggle').textContent=register?'返回登录':'注册账号';
 }
 async function boot() {
-  try {const config=await api('/status');state.initialized=config.initialized;state.registrationOpen=config.registration_open;state.publicApiUrl=config.public_api_url||'';state.clientVersion=config.client_version||'';state.me=await api('/me');await loggedIn();}
+  try {const config=await api('/status');state.initialized=config.initialized;state.registrationOpen=config.registration_open;state.publicApiUrl=config.public_api_url||'';state.singlePort=!!config.single_port;state.clientVersion=config.client_version||'';state.me=await api('/me');await loggedIn();}
   catch {displayAuth();}
 }
 async function loggedIn() {
@@ -450,7 +450,7 @@ async function showSetup(forceLink=false) {
   catch(error){toast(error.message);return;}
   setSessionChangeMode(false);
   if(state.setupRoom!==state.room){state.setupRevision=0;state.setupSummary=null;clearSetupLink();$('roles').replaceChildren();$('no-roles').hidden=false;$('workspace-path').value='';$('project-name').value='';$('same-as-manager').checked=true;renderProjectChoice();$('setup-project').textContent='';$('setup-project').title='';}
-  $('api-url').value=state.publicApiUrl||localStorage.getItem('agentchat-api-url')||(location.protocol==='https:'?location.origin:`${location.protocol}//${location.hostname.includes(':')?'['+location.hostname+']':location.hostname}:8781`);
+  $('api-url').value=state.publicApiUrl||localStorage.getItem('agentchat-api-url')||(state.singlePort||location.protocol==='https:'?location.origin:`${location.protocol}//${location.hostname.includes(':')?'['+location.hostname+']':location.hostname}:8781`);
   $('setup-dialog').showModal();
   try {await Promise.all([state.setupRoom!==state.room?loadSetupProfile():Promise.resolve(),loadTemplates()]);}
   catch(error){toast(error.message);}
